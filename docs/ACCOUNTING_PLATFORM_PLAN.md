@@ -123,6 +123,10 @@ automated tests; Stripe tests use test-mode fixtures or mocks.
 
 ### Goal 2 — ledger APIs and reports
 
+Implemented: read-only chart, entry list/detail, general-ledger and trial-balance
+APIs with explicit Django model permissions. See [Ledger API](LEDGER_API.md)
+for routes, group setup, report semantics, and current limitations.
+
 - Add protected APIs for chart accounts, entries, trial balance, and general
   ledger.
 - Add role permissions and pagination/filtering.

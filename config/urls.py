@@ -26,6 +26,7 @@ urlpatterns = [
     path("api/v1/profiles/", include("core_apps.user_profile.urls")),
     path("api/v1/accounts/", include("core_apps.accounts.urls")),
     path("api/v1/cards/", include("core_apps.cards.urls")),
+    path("api/v1/accounting/", include("core_apps.accounting.urls")),
 ]
 
 admin.site.site_header = "NextGen Bank Admin"
