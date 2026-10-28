@@ -88,6 +88,18 @@ Never store card numbers, CVC/CVV values, or Stripe secret keys in the database.
 
 Each goal is completed in its own focused commit.
 
+## Test and commit policy
+
+Every commit must be backed by tests appropriate to its scope. Before creating
+the commit, run the relevant test module(s), a full affected-app test run, and
+static validation such as `python manage.py check`. The commit message records
+one completed goal only; the handoff reports the commands and their results.
+
+Financial changes require tests for both the expected path and safety rules:
+balance validation, duplicate/replayed requests or webhooks, partial payments,
+permissions, and transaction rollback. No Stripe live-mode call will be made by
+automated tests; Stripe tests use test-mode fixtures or mocks.
+
 ### Goal 0 — project foundation
 
 - Add test settings and pytest/pytest-django.
@@ -95,6 +107,8 @@ Each goal is completed in its own focused commit.
 - Define accounting roles and base currency.
 
 **Commit:** `chore: add accounting development foundation`
+
+**Verification:** `pytest`, `python manage.py check --settings=config.settings.test`
 
 ### Goal 1 — double-entry ledger
 
@@ -105,6 +119,8 @@ Each goal is completed in its own focused commit.
 
 **Commit:** `feat: add double-entry accounting ledger`
 
+**Verification:** ledger model/service tests plus `python manage.py check`.
+
 ### Goal 2 — ledger APIs and reports
 
 - Add protected APIs for chart accounts, entries, trial balance, and general
@@ -113,6 +129,8 @@ Each goal is completed in its own focused commit.
 
 **Commit:** `feat: expose ledger reporting APIs`
 
+**Verification:** API permission, filtering, pagination, and report-total tests.
+
 ### Goal 3 — AR invoicing
 
 - Add customers, invoice drafts, invoice lines, posting, and cancellation.
@@ -120,6 +138,9 @@ Each goal is completed in its own focused commit.
 - Support partial payment allocations.
 
 **Commit:** `feat: add accounts receivable invoicing`
+
+**Verification:** invoice posting, partial allocation, cancellation, and aging
+tests.
 
 ### Goal 4 — Stripe invoice payments
 
@@ -130,11 +151,17 @@ Each goal is completed in its own focused commit.
 
 **Commit:** `feat: accept Stripe invoice payments`
 
+**Verification:** signed webhook, duplicate webhook, failed payment, partial
+payment, and balanced-ledger tests.
+
 ### Goal 5 — AP supplier bills
 
 - Add suppliers, bills, lines, approvals, payment allocations, and AP aging.
 
 **Commit:** `feat: add accounts payable workflow`
+
+**Verification:** bill posting, approval, partial supplier payment, and AP-aging
+tests.
 
 ### Goal 6 — reconciliation and financial reports
 
@@ -144,6 +171,9 @@ Each goal is completed in its own focused commit.
   history.
 
 **Commit:** `feat: add reconciliation and financial reports`
+
+**Verification:** payout, fee, refund, reconciliation, and financial-statement
+tests.
 
 ## First vertical slice
 
