@@ -2,3 +2,5 @@
 
 watchfiles==0.22.0
 black==24.8.0
+pytest==8.3.3
+pytest-django==4.9.0

@@ -1,0 +1,12 @@
+services:
+  tests:
+    build:
+      context: ..
+      dockerfile: ./docker/local/django/Dockerfile
+    working_dir: /app
+    volumes:
+      - ..:/app
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.test
+    entrypoint: []
+    command: pytest

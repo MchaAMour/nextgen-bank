@@ -253,12 +253,28 @@ COOKIE_HTTPONLY = True
 
 COOKIE_SECURE = getenv("COOKIE_SECURE", "True") == "True"
 
+# Stripe is introduced in the AR payment phase. Keys stay in environment
+# variables and must never be persisted in the application database.
+STRIPE_SECRET_KEY = getenv("STRIPE_SECRET_KEY", "")
+STRIPE_PUBLISHABLE_KEY = getenv("STRIPE_PUBLISHABLE_KEY", "")
+STRIPE_WEBHOOK_SECRET = getenv("STRIPE_WEBHOOK_SECRET", "")
+ACCOUNTING_BASE_CURRENCY = getenv("ACCOUNTING_BASE_CURRENCY", "USD")
+
 LOGGING_CONFIG = None
+
+LOG_DIR = BASE_DIR / "logs"
+try:
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+except OSError:
+    # Source-mounted containers can be read-only for the unprivileged Django
+    # user. Logging must not prevent the app or its isolated tests from starting.
+    LOG_DIR = Path("/tmp/nextgen-bank-logs")
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 LOGURU_LOGGING = {
     "handlers": [
         {
-            "sink": BASE_DIR / "logs/debug.log",
+            "sink": LOG_DIR / "debug.log",
             "level": "DEBUG",
             "filter": lambda record: record["level"].no <= logger.level("WARNING").no,
             "format": "{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {name}:{function}:{line} - "
@@ -268,7 +284,7 @@ LOGURU_LOGGING = {
             "compression": "zip",
         },
         {
-            "sink": BASE_DIR / "logs/error.log",
+            "sink": LOG_DIR / "error.log",
             "level": "ERROR",
             "format": "{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {name}:{function}:{line} - "
             "{message}",

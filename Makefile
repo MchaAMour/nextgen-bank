@@ -33,3 +33,9 @@ network-inspect:
 
 banker-db:
 	docker compose -f local.yml exec postgres psql --username=alphaogilo --dbname=banker
+
+test:
+	docker compose -f docker/test.yml run --rm --build tests
+
+check:
+	docker compose -f docker/test.yml run --rm --build tests python manage.py check
