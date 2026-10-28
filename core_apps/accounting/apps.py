@@ -6,3 +6,6 @@ class AccountingConfig(AppConfig):
     default_auto_field = "django.db.models.BigAutoField"
     name = "core_apps.accounting"
     verbose_name = _("Accounting")
+
+    def ready(self):
+        from . import checks  # noqa: F401  Registers system checks.

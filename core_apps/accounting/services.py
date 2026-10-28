@@ -5,7 +5,7 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone
 
-from .models import (ChartOfAccount, CreditNote, Customer, CustomerPayment, Invoice, InvoiceLine, JournalEntry,
+from .models import (BASE_CURRENCY, ChartOfAccount, CreditNote, Customer, CustomerPayment, Invoice, InvoiceLine, JournalEntry,
     JournalLine, PaymentAllocation, PaymentRefund)
 
 
@@ -32,7 +32,7 @@ def _add_invoice_lines(invoice, lines):
 
 
 @transaction.atomic
-def create_draft_invoice(*, customer, number, issue_date, due_date, lines, currency="USD"):
+def create_draft_invoice(*, customer, number, issue_date, due_date, lines, currency=BASE_CURRENCY):
     """Create a complete draft atomically, without recording revenue or AR yet."""
     customer = _active_customer(customer)
     lines = _required_lines(lines)
@@ -43,7 +43,7 @@ def create_draft_invoice(*, customer, number, issue_date, due_date, lines, curre
 
 
 @transaction.atomic
-def replace_draft_invoice(invoice, *, customer, number, issue_date, due_date, lines, currency="USD"):
+def replace_draft_invoice(invoice, *, customer, number, issue_date, due_date, lines, currency=BASE_CURRENCY):
     """Replace a draft's header and lines under the posting lock, without ledger effect."""
     invoice = Invoice.objects.select_for_update().get(pk=invoice.pk)
     if invoice.status != "draft":

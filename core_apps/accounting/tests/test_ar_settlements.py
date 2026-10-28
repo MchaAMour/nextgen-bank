@@ -27,7 +27,7 @@ def customer():
 
 @pytest.fixture
 def make_invoice(customer):
-    def make(number, amount="100", currency="USD", owner=None, post=True):
+    def make(number, amount="100", currency="EUR", owner=None, post=True):
         invoice = create_draft_invoice(customer=owner or customer, number=number, issue_date=DAY,
             due_date=date(2026, 1, 31), currency=currency,
             lines=[dict(description="Work", quantity="1", unit_price=amount)])
@@ -35,7 +35,7 @@ def make_invoice(customer):
     return make
 
 
-def pay(customer, amount, reference="P1", on=DAY, currency="USD", allocations=()):
+def pay(customer, amount, reference="P1", on=DAY, currency="EUR", allocations=()):
     return record_customer_payment(customer, amount=amount, currency=currency, reference=reference,
                                    received_on=on, allocations=allocations)
 
@@ -75,13 +75,12 @@ def test_one_invoice_paid_by_several_payments(customer, make_invoice):
     assert not CustomerPayment.objects.filter(reference="P3").exists()
 
 
-@pytest.mark.parametrize("problem", ["other_customer", "currency", "draft", "before_payment",
+@pytest.mark.parametrize("problem", ["other_customer", "draft", "before_payment",
                                      "over_invoice", "over_payment", "float"])
 def test_invalid_allocations_are_rejected(customer, make_invoice, problem):
     payment = pay(customer, "50", on=date(2026, 1, 10))
     other = Customer.objects.create(name="Other")
     invoice = {"other_customer": lambda: make_invoice("X", owner=other),
-               "currency": lambda: make_invoice("X", currency="EUR"),
                "draft": lambda: make_invoice("X", post=False)}.get(problem, lambda: make_invoice("X", "30"))()
     amount = {"over_invoice": "30.01", "over_payment": "30", "float": 1.5}.get(problem, "10")
     if problem == "over_payment":
@@ -98,7 +97,7 @@ def test_payment_replays_and_conflicts(customer, make_invoice):
     payment = pay(customer, "50", allocations=allocations)
     assert pay(customer, "50", allocations=allocations).pk == payment.pk
     assert pay(customer, "50").pk == payment.pk  # Allocations already applied are not required again.
-    for changes in [dict(amount="51"), dict(on=date(2026, 1, 2)), dict(currency="EUR"),
+    for changes in [dict(amount="51"), dict(on=date(2026, 1, 2)), dict(currency="USD"),
                     dict(allocations=[{**allocations[0], "amount": "41"}]),
                     dict(allocations=allocations + [{"invoice": invoice, "amount": "1", "reference": "A2"}])]:
         with pytest.raises(ValidationError):
@@ -164,7 +163,7 @@ def test_settled_invoices_cannot_be_cancelled(customer, make_invoice, settlement
     with pytest.raises(ValidationError):
         cancel_invoice(invoice, cancellation_date=DAY)
     # A correct reversing entry still cannot cancel it through raw SQL.
-    reversal = _post_pair(debit_code="4000", credit_code="1100", amount=Decimal("100"), currency="USD",
+    reversal = _post_pair(debit_code="4000", credit_code="1100", amount=Decimal("100"), currency="EUR",
         source_type="invoice", source_id=invoice.pk, entry_date=DAY, memo="Raw", reversal_of=invoice.journal_entry)
     with pytest.raises(IntegrityError):
         raw("UPDATE accounting_invoice SET status = 'cancelled', cancellation_entry_id = %s WHERE id = %s",
@@ -186,10 +185,10 @@ def test_aging_reports_unapplied_credit_and_reconciles_to_ledger(customer, make_
                 date(2026, 2, 5): (Decimal("50"), Decimal("20")),
                 date(2026, 3, 1): (Decimal("35"), Decimal("0"))}
     for as_of, (total, unapplied) in expected.items():
-        usd = invoice_aging(as_of=as_of)["USD"]
-        assert (usd["total"], usd["unapplied"]) == (total, unapplied)
-        assert usd["net"] == total - unapplied == ar_ledger_balance(as_of)
-    assert invoice_aging(as_of=date(2026, 1, 15))["USD"]["current"] == Decimal("120")
+        eur = invoice_aging(as_of=as_of)["EUR"]
+        assert (eur["total"], eur["unapplied"]) == (total, unapplied)
+        assert eur["net"] == total - unapplied == ar_ledger_balance(as_of)
+    assert invoice_aging(as_of=date(2026, 1, 15))["EUR"]["current"] == Decimal("120")
 
 
 @pytest.mark.parametrize("table", ["customerpayment", "paymentallocation", "paymentrefund", "creditnote"])
@@ -258,12 +257,12 @@ def test_receipts_migrate_to_single_allocation_payments():
         apps = executor.loader.project_state(before).apps
         customer = apps.get_model("accounting", "Customer").objects.create(name="Legacy")
         invoice = apps.get_model("accounting", "Invoice").objects.create(
-            customer=customer, number="LEGACY-1", issue_date=DAY, due_date=DAY)
+            customer=customer, number="LEGACY-1", issue_date=DAY, due_date=DAY, currency="EUR")
         apps.get_model("accounting", "InvoiceLine").objects.create(
             invoice=invoice, description="Work", quantity=1, unit_price=Decimal("100"))
         invoice = Invoice.objects.get(pk=invoice.pk)
         post_invoice(invoice)
-        entry = _post_pair(debit_code="1000", credit_code="1100", amount=Decimal("40"), currency="USD",
+        entry = _post_pair(debit_code="1000", credit_code="1100", amount=Decimal("40"), currency="EUR",
             source_type="invoice", source_id=invoice.pk, entry_date=DAY, memo="Receipt R-OLD")
         apps.get_model("accounting", "InvoiceReceipt").objects.create(invoice_id=invoice.pk, reference="R-OLD",
             amount=Decimal("40"), received_on=DAY, journal_entry_id=entry.pk)
@@ -282,7 +281,7 @@ def test_receipts_migrate_to_single_allocation_payments():
 def test_settlement_api(client, user, customer, make_invoice):
     grant(user, *WRITE_PERMISSIONS)
     first, second = make_invoice("S-1", "100"), make_invoice("S-2", "80")
-    body = {"customer": str(customer.pk), "reference": "API-P", "amount": "150.00", "currency": "USD",
+    body = {"customer": str(customer.pk), "reference": "API-P", "amount": "150.00", "currency": "EUR",
             "received_on": "2026-01-10", "allocations": [
                 {"invoice": str(first.pk), "amount": "100.00", "reference": "API-A1"}]}
     created = client.post(BASE + "payments/", body, format="json")
@@ -309,7 +308,7 @@ def test_settlement_api(client, user, customer, make_invoice):
     invoices = {row["number"]: row["open_balance"] for row in client.get(BASE + "invoices/").data["results"]}
     assert invoices == {"S-1": "0.00", "S-2": "0.00"}
     aging = client.get(BASE + "ar-aging/", {"as_of": "2026-01-12"}).data["currencies"]
-    assert aging == {} or aging["USD"]["net"] == "0.00"
+    assert aging == {} or aging["EUR"]["net"] == "0.00"
 
 
 @pytest.mark.parametrize("path,permission", [("allocations/", "add_paymentallocation"),

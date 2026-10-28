@@ -20,7 +20,7 @@ from .services import record_customer_payment
 
 # Tags these sessions in the Stripe Dashboard; the suffix is fixed so all sessions share one label.
 INTEGRATION_IDENTIFIER = "nextgen_ar_invoice_qhzmtwkd"
-MINOR_UNITS = Decimal("100")  # USD, EUR and GBP use two decimal places (MONEY-01).
+MINOR_UNITS = Decimal("100")  # EUR has two decimal places.
 REUSE_MARGIN = timedelta(minutes=10)
 PAID_STATUSES = {"paid", "no_payment_required"}
 FULFILLING_EVENTS = {"checkout.session.completed", "checkout.session.async_payment_succeeded"}

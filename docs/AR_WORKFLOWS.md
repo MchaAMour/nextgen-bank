@@ -2,8 +2,9 @@
 
 The service layer supports draft invoices, posting, unpaid cancellation,
 reusable customer payments with allocations, refunds of unapplied credit,
-credit notes and historical aging. Tax is not supported (see MONEY-01). Use
-decimal strings or Decimal for amounts.
+credit notes and historical aging. All amounts are in EUR, the only ledger
+currency; tax is not supported (see MONEY-01). Use decimal strings or Decimal
+for amounts.
 
 | Service | Accounting effect |
 | --- | --- |

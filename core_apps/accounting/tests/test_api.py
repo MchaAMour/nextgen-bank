@@ -4,6 +4,8 @@ from decimal import Decimal
 import pytest
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group, Permission
+from django.core.exceptions import ValidationError
+from django.db import IntegrityError, connection, transaction
 from rest_framework.test import APIClient
 
 from core_apps.accounting.models import ChartOfAccount, JournalEntry, JournalLine
@@ -43,7 +45,7 @@ def client(user):
 
 @pytest.fixture
 def entry_factory():
-    def create(amount="25.00", currency="USD", day=date(2026, 1, 10), posted=True):
+    def create(amount="25.00", currency="EUR", day=date(2026, 1, 10), posted=True):
         entry = JournalEntry.objects.create(entry_date=day, memo="Test receipt")
         JournalLine.objects.create(
             entry=entry,
@@ -123,18 +125,30 @@ def test_entry_detail_requires_permissions(user, entry_factory):
     assert client.get(BASE + f"entries/{entry.pk}/").status_code == 403
 
 
-def test_trial_balance_excludes_drafts_and_separates_currencies(client, entry_factory):
+def test_trial_balance_excludes_drafts(client, entry_factory):
     entry_factory()
     entry_factory("10.25")
     entry_factory("99.00", posted=False)
-    entry_factory("7.50", currency="EUR")
     response = client.get(BASE + "trial-balance/")
     assert response.status_code == 200
     groups = {row["currency"]: row for row in response.data["currencies"]}
-    assert groups["USD"]["debit_total"] == groups["USD"]["credit_total"] == "35.25"
-    assert groups["EUR"]["debit_total"] == groups["EUR"]["credit_total"] == "7.50"
-    assert all(row["balanced"] for row in groups.values())
-    assert groups["USD"]["accounts"][0]["code"] == "1000"
+    assert list(groups) == ["EUR"]
+    assert groups["EUR"]["debit_total"] == groups["EUR"]["credit_total"] == "35.25"
+    assert groups["EUR"]["balanced"]
+    assert groups["EUR"]["accounts"][0]["code"] == "1000"
+
+
+@pytest.mark.parametrize("currency", ["USD", "GBP"])
+def test_journal_lines_must_use_the_base_currency(currency):
+    entry = JournalEntry.objects.create()
+    with pytest.raises(ValidationError):
+        JournalLine.objects.create(entry=entry, account=ChartOfAccount.objects.get(code="1000"),
+                                   debit=Decimal("1"), currency=currency)
+    line = JournalLine.objects.create(entry=entry, account=ChartOfAccount.objects.get(code="1000"),
+                                      debit=Decimal("1"))
+    with pytest.raises(IntegrityError), transaction.atomic(), connection.cursor() as cursor:
+        cursor.execute("UPDATE accounting_journalline SET currency = %s WHERE id = %s",
+                       [currency, JournalLine._meta.pk.get_db_prep_value(line.pk, connection)])
 
 
 def test_trial_balance_uses_net_account_balances(client, entry_factory):
@@ -158,9 +172,8 @@ def test_trial_balance_uses_net_account_balances(client, entry_factory):
 def test_report_filters_and_ledger_pagination(client, entry_factory):
     entry = entry_factory()
     entry_factory(day=date(2026, 1, 11))
-    entry_factory(currency="EUR")
     entry_factory(posted=False)
-    params = {"start_date": "2026-01-10", "end_date": "2026-01-10", "currency": "USD"}
+    params = {"start_date": "2026-01-10", "end_date": "2026-01-10", "currency": "EUR"}
     response = client.get(BASE + "general-ledger/", {**params, "page_size": 1})
     assert response.data["count"] == 2
     assert len(response.data["results"]) == 1

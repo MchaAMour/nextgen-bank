@@ -32,12 +32,12 @@ def writer(client, user):
 
 def draft_payload(customer, **changes):
     return {"customer": str(customer.pk), "number": "API-1", "issue_date": "2026-01-01",
-            "due_date": "2026-01-31", "currency": "USD",
+            "due_date": "2026-01-31", "currency": "EUR",
             "lines": [{"description": "Work", "quantity": "2", "unit_price": "50.00"}], **changes}
 
 
 def payment_payload(customer, invoice_id, amount, reference, allocated=None):
-    return {"customer": str(customer.pk), "reference": reference, "amount": amount, "currency": "USD",
+    return {"customer": str(customer.pk), "reference": reference, "amount": amount, "currency": "EUR",
             "received_on": "2026-01-15", "allocations": [
                 {"invoice": str(invoice_id), "amount": allocated or amount, "reference": f"{reference}-A"}]}
 

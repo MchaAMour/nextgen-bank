@@ -15,7 +15,7 @@ regression test or documented verification; record the evidence here.
 | CFG-01 | Medium / open | Test settings import base settings, which can load production dotenv values and configure Cloudinary before overrides. Isolate configuration and block external networking in tests. |
 | CFG-02 | Medium / open | Pytest dependencies exist in requirements/local.txt but not Pipfile.lock. Align supported dependency installation paths and lock transitive dependencies. |
 | AUTH-01 | Medium / open | Finance permissions currently require manual Group configuration. Add an idempotent role setup command with least-privilege tests. |
-| MONEY-01 | Medium / open | USD is a provisional example default; two decimal places are assumed. Confirm base currency and supported currency precision before payment integration. Tax/VAT requirements are undecided. |
+| MONEY-01 | Medium / decided | Decided 2026-10-28: EUR, the Stripe account's settlement currency, is the only ledger currency (migration 0008 constrains invoices, payments and journal lines; system check `accounting.E001` rejects another `ACCOUNTING_BASE_CURRENCY`). Other currencies need exchange rates and FX gain/loss accounting. Tax/VAT requirements remain undecided. |
 | OBS-01 | Low / open | Existing Django timezone and ReportLab deprecation warnings remain. Identify and address their sources during dependency maintenance. |
 | STRIPE-01 | Medium / open | `STRIPE_SECRET_KEY` is a full test-mode secret key. Before any shared or deployed environment, replace it with a restricted key (`rk_`) limited to Checkout Sessions (write) and keep it in a secrets vault. |
 | STRIPE-02 | High / open | Stripe payments debit clearing (1010), which is not yet reconciled: Stripe fees, payouts, refunds and disputes are not recorded. Required before live mode (Goal 6). |
@@ -71,6 +71,14 @@ regression test or documented verification; record the evidence here.
   fully allocated; the entry was Dr 1010 / Cr 1100 125.50; the invoice open
   balance and the AR ledger balance were both 0.00 and the ledger balanced.
 
+- MONEY-01 (migration `0008_eur_base_currency`): non-EUR invoices, payments
+  and journal lines are rejected by model validation and by database check
+  constraints (raw SQL test). The migration refuses to run while non-EUR rows
+  exist (checked on PostgreSQL 16). On SQLite it suspends and restores all
+  accounting triggers around the table rebuilds; the raw-SQL trigger tests
+  still pass afterwards. 197 SQLite tests passed; one-off PostgreSQL run: 196
+  accounting tests passed.
+
 ## Scope checkpoints
 
 - Ledger reporting is read-only; do not describe the ledger as production-ready.
@@ -85,6 +93,4 @@ Stripe Checkout stage (Goal 4): `make test` ran 195 SQLite tests, all passed;
 accounting tests (the SQLite-settings assertion fails by design). One live
 test-mode Checkout payment succeeded end to end (STRIPE-04). PG-01 (a PostgreSQL test job)
 remains open. Finance roles still need manual Group setup (AUTH-01).
-No PostgreSQL concurrency validation has been performed. Draft currency support
-is provisionally limited to USD, EUR and GBP, all with two decimal places;
-this is not a decision about the eventual business's base currency or taxes.
+EUR is the only ledger currency (MONEY-01). Tax is not supported.

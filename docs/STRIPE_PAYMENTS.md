@@ -29,8 +29,9 @@ developing). Django remains the ledger; Stripe only collects the money.
 - Sessions are created with an idempotency key per invoice and attempt, tagged
   with `integration_identifier`, and without `payment_method_types`, so the
   payment methods enabled in the Stripe Dashboard apply.
-- Amounts are sent in minor units. Only USD, EUR and GBP (two decimal places)
-  are supported (MONEY-01). No tax is calculated.
+- Amounts are sent in minor units. EUR, the Stripe account's settlement
+  currency, is the only ledger currency (MONEY-01), so Stripe amounts match the
+  ledger without conversion. No tax is calculated.
 
 ## Webhook events
 

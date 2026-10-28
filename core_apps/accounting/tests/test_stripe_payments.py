@@ -68,7 +68,7 @@ def signed_post(payload, secret=SECRET, signature=None):
 
 
 def session_event(session, event_type="checkout.session.completed", event_id="evt_1", payment_status="paid",
-                  amount_total=None, currency="usd", created=None):
+                  amount_total=None, currency="eur", created=None):
     amount = amount_total if amount_total is not None else int(session.amount * 100)
     return {"id": event_id, "type": event_type, "livemode": False,
             "created": created or int(time.mktime(date(2026, 1, 20).timetuple())),
@@ -90,7 +90,7 @@ def test_checkout_uses_open_balance_and_stripe_best_practices(posted, fake_strip
     options = fake_stripe.v1.checkout.sessions.create.call_args.kwargs["options"]
     assert session.amount == Decimal("70.00") and session.status == "open"
     assert params["line_items"][0]["price_data"]["unit_amount"] == 7000
-    assert params["line_items"][0]["price_data"]["currency"] == "usd"
+    assert params["line_items"][0]["price_data"]["currency"] == "eur"
     assert params["mode"] == "payment" and params["client_reference_id"] == str(posted.pk)
     assert params["integration_identifier"] == INTEGRATION_IDENTIFIER
     assert "payment_method_types" not in params
@@ -141,7 +141,7 @@ def test_checkout_requires_open_balance(invoice, fake_stripe, state):
 def test_one_active_session_per_invoice_in_the_database(checkout):
     with pytest.raises(IntegrityError), transaction.atomic():
         StripeCheckoutSession.objects.create(invoice=checkout.invoice, stripe_session_id="cs_other", url=checkout.url,
-            amount=checkout.amount, currency="USD", expires_at=checkout.expires_at)
+            amount=checkout.amount, currency="EUR", expires_at=checkout.expires_at)
 
 
 def test_checkout_api(client, user, posted, fake_stripe):
@@ -236,22 +236,22 @@ def test_unknown_sessions_and_other_events_are_ignored(checkout):
 
 
 def test_currency_mismatch_fails_and_retry_succeeds(checkout):
-    response = signed_post(session_event(checkout, currency="eur"))
+    response = signed_post(session_event(checkout, currency="usd"))
     assert response.status_code == 500
     event = StripeWebhookEvent.objects.get()
     assert (event.status, event.attempts) == ("failed", 1) and "currency" in event.error
     assert not CustomerPayment.objects.exists()
     with patch("core_apps.accounting.stripe_payments._apply", return_value=True):
-        assert signed_post(session_event(checkout, currency="eur")).status_code == 200
+        assert signed_post(session_event(checkout, currency="usd")).status_code == 200
     event.refresh_from_db()
     assert (event.status, event.attempts, event.error) == ("processed", 2, "")
 
 
 def test_payment_trigger_accepts_only_cash_or_clearing_debits(posted):
     from django.core.exceptions import ValidationError
-    payment = record_customer_payment(posted.customer, amount="5", currency="USD", reference="CLR",
+    payment = record_customer_payment(posted.customer, amount="5", currency="EUR", reference="CLR",
                                       received_on=date(2026, 1, 2), cash_account="1010")
     assert payment.journal_entry.lines.filter(account__code="1010", debit=5).exists()
     with pytest.raises(ValidationError):
-        record_customer_payment(posted.customer, amount="5", currency="USD", reference="EXP",
+        record_customer_payment(posted.customer, amount="5", currency="EUR", reference="EXP",
                                 received_on=date(2026, 1, 2), cash_account="5000")

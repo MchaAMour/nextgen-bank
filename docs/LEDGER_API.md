@@ -48,7 +48,7 @@ does not imply that its underlying journal entries are unbalanced.
 Example request:
 
 ```text
-GET /api/v1/accounting/trial-balance/?end_date=2026-01-31&currency=USD
+GET /api/v1/accounting/trial-balance/?end_date=2026-01-31&currency=EUR
 ```
 
 ## Development verification

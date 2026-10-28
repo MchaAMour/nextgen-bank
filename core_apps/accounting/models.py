@@ -1,6 +1,5 @@
 from decimal import Decimal, ROUND_HALF_UP
 
-from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
@@ -12,7 +11,10 @@ from django.utils.translation import gettext_lazy as _
 from core_apps.common.models import TimeStampedModel
 
 User = get_user_model()
-INVOICE_CURRENCIES = ("USD", "EUR", "GBP")
+# The ledger has one currency: EUR, the Stripe account's settlement currency. Adding
+# another needs exchange rates and FX gain/loss accounting (MONEY-01).
+BASE_CURRENCY = "EUR"
+INVOICE_CURRENCIES = (BASE_CURRENCY,)
 
 
 class GuardedQuerySet(models.QuerySet):
@@ -82,7 +84,7 @@ class Invoice(TimeStampedModel):
     customer = models.ForeignKey(Customer, on_delete=models.PROTECT, related_name="invoices")
     issue_date = models.DateField(default=timezone.localdate)
     due_date = models.DateField()
-    currency = models.CharField(max_length=3, default="USD")
+    currency = models.CharField(max_length=3, default=BASE_CURRENCY)
     status = models.CharField(max_length=10, default="draft", choices=[
         ("draft", "Draft"), ("posted", "Posted"), ("cancelled", "Cancelled")])
     posted_total = models.DecimalField(max_digits=18, decimal_places=2, null=True, blank=True)
@@ -114,7 +116,7 @@ class Invoice(TimeStampedModel):
         if self.issue_date and self.due_date and self.due_date < self.issue_date:
             raise ValidationError({"due_date": "Due date must not precede issue date."})
         if self.currency not in INVOICE_CURRENCIES:
-            raise ValidationError({"currency": "Draft invoices currently support USD, EUR and GBP."})
+            raise ValidationError({"currency": f"Invoices must use {BASE_CURRENCY}."})
 
     @transaction.atomic
     def save(self, *args, **kwargs):
@@ -471,7 +473,7 @@ class JournalLine(TimeStampedModel):
         default=Decimal("0.00"),
         validators=[MinValueValidator(Decimal("0.00"))],
     )
-    currency = models.CharField(max_length=3, default=settings.ACCOUNTING_BASE_CURRENCY)
+    currency = models.CharField(max_length=3, default=BASE_CURRENCY)
 
     class Meta:
         ordering = ["created_at"]
@@ -479,7 +481,10 @@ class JournalLine(TimeStampedModel):
             models.CheckConstraint(
                 check=models.Q(debit__gte=0) & models.Q(credit__gte=0),
                 name="accounting_line_amounts_are_non_negative",
-            )
+            ),
+            models.CheckConstraint(
+                check=models.Q(currency=BASE_CURRENCY), name="accounting_line_base_currency"
+            ),
         ]
 
     def clean(self) -> None:

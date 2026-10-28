@@ -268,7 +268,8 @@ STRIPE_CHECKOUT_SUCCESS_URL = getenv(
 STRIPE_CHECKOUT_CANCEL_URL = getenv(
     "STRIPE_CHECKOUT_CANCEL_URL", "http://localhost:8080/payments/cancelled"
 )
-ACCOUNTING_BASE_CURRENCY = getenv("ACCOUNTING_BASE_CURRENCY", "USD")
+# Must match core_apps.accounting.models.BASE_CURRENCY; a system check enforces it.
+ACCOUNTING_BASE_CURRENCY = getenv("ACCOUNTING_BASE_CURRENCY", "EUR")
 
 LOGGING_CONFIG = None
 

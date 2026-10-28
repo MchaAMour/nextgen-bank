@@ -12,4 +12,4 @@ def test_automated_tests_use_safe_local_configuration():
     assert settings.CELERY_TASK_ALWAYS_EAGER is True
     assert settings.STRIPE_SECRET_KEY == ""
     assert settings.STRIPE_WEBHOOK_SECRET == ""
-    assert settings.ACCOUNTING_BASE_CURRENCY == "USD"
+    assert settings.ACCOUNTING_BASE_CURRENCY == "EUR"

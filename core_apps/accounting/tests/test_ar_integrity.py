@@ -104,11 +104,11 @@ def test_raw_payment_insert_requires_matching_ledger_entry(payment, case):
         entry, amount = payment.allocations.get().invoice.journal_entry, Decimal("100.00")
     else:
         entry, amount = _post_pair(debit_code="1000", credit_code="1100", amount=Decimal("40.00"),
-            currency="USD", source_type="customer_payment", source_id=None, entry_date=DAY,
+            currency="EUR", source_type="customer_payment", source_id=None, entry_date=DAY,
             memo="Unused"), Decimal("60.01")
     with pytest.raises(IntegrityError):
         raw("INSERT INTO accounting_customerpayment (id, created_at, updated_at, customer_id, reference,"
-            " amount, currency, received_on, journal_entry_id) VALUES (%s, %s, %s, %s, %s, %s, 'USD', %s, %s)",
+            " amount, currency, received_on, journal_entry_id) VALUES (%s, %s, %s, %s, %s, %s, 'EUR', %s, %s)",
             new_id(), payment.created_at, payment.created_at, db_id(payment.customer), f"RAW-{case}",
             amount, DAY, db_id(entry))
     assert CustomerPayment.objects.count() == 1

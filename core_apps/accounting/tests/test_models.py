@@ -37,3 +37,10 @@ def test_journal_line_requires_exactly_one_amount(debit, credit):
 
     with pytest.raises(ValidationError):
         JournalLine.objects.create(entry=entry, account=account, debit=debit, credit=credit)
+
+
+def test_base_currency_setting_must_match_ledger(settings):
+    from core_apps.accounting.checks import base_currency_matches_ledger
+    assert base_currency_matches_ledger(None) == []
+    settings.ACCOUNTING_BASE_CURRENCY = "USD"
+    assert [error.id for error in base_currency_matches_ledger(None)] == ["accounting.E001"]

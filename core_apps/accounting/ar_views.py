@@ -10,7 +10,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from django_filters.rest_framework import DjangoFilterBackend
 
-from .models import (CreditNote, Customer, CustomerPayment, Invoice, InvoiceLine, PaymentAllocation, PaymentRefund,
+from .models import (BASE_CURRENCY, CreditNote, Customer, CustomerPayment, Invoice, InvoiceLine, PaymentAllocation, PaymentRefund,
     StripeCheckoutSession)
 from .permissions import AccountingPermission
 from .services import (allocate_payment, cancel_invoice, create_draft_invoice, delete_draft_invoice,
@@ -113,7 +113,7 @@ class DraftInvoiceInput(serializers.Serializer):
     number = serializers.CharField(max_length=40)
     issue_date = serializers.DateField()
     due_date = serializers.DateField()
-    currency = serializers.CharField(max_length=3, default="USD")
+    currency = serializers.CharField(max_length=3, default=BASE_CURRENCY)
     lines = InvoiceLineSerializer(many=True, allow_empty=False)
 
 

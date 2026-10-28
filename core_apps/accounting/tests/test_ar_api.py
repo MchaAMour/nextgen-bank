@@ -22,7 +22,7 @@ def test_ar_requires_permission(endpoint, user):
 def test_invoice_balances_and_payments(client, invoice):
     invoice = post_invoice(invoice)
     receive_invoice_payment(invoice, amount="30", reference="AR-API", received_on=date(2026, 2, 1))
-    response = client.get(BASE + "invoices/", {"status": "posted", "currency": "USD"})
+    response = client.get(BASE + "invoices/", {"status": "posted", "currency": "EUR"})
     assert response.status_code == 200
     assert response.data["count"] == 1
     row = response.data["results"][0]
@@ -41,7 +41,7 @@ def test_historical_ar_api(client, invoice):
     receive_invoice_payment(invoice, amount="30", reference="AR-HISTORY", received_on=date(2026, 2, 1))
     response = client.get(BASE + "ar-aging/", {"as_of": "2026-01-31"})
     assert response.status_code == 200
-    assert response.data["currencies"]["USD"]["current"] == "100.00"
+    assert response.data["currencies"]["EUR"]["current"] == "100.00"
     response = client.get(BASE + "ar-aging/", {"as_of": "2026-02-01"})
-    assert response.data["currencies"]["USD"]["1_30"] == "70.00"
+    assert response.data["currencies"]["EUR"]["1_30"] == "70.00"
     assert client.get(BASE + "ar-aging/", {"as_of": "invalid"}).status_code == 400

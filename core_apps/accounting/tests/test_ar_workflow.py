@@ -63,7 +63,7 @@ def test_cancellation_offsets_ledger_and_historical_aging(invoice):
     cancel_invoice(invoice, cancellation_date=date(2026, 3, 1))
     lines = JournalLine.objects.filter(account__code="1100")
     assert sum(l.debit - l.credit for l in lines) == 0
-    assert invoice_aging(as_of=date(2026, 2, 15))["USD"]["1_30"] == Decimal("100")
+    assert invoice_aging(as_of=date(2026, 2, 15))["EUR"]["1_30"] == Decimal("100")
     assert invoice_aging(as_of=date(2026, 3, 1)) == {}
     with pytest.raises(ValidationError):
         cancel_invoice(invoice, cancellation_date=date(2026, 3, 2))
@@ -82,8 +82,8 @@ def test_paid_invoice_cannot_be_cancelled(invoice):
 def test_aging_buckets_exclude_future_receipts(invoice, as_of, bucket):
     invoice = post_invoice(invoice)
     receive_invoice_payment(invoice, amount="25", reference="R", received_on=date(2026,6,1))
-    assert invoice_aging(as_of=as_of)["USD"][bucket] == Decimal("100")
-    assert invoice_aging(as_of=date(2026,6,1))["USD"]["total"] == Decimal("75")
+    assert invoice_aging(as_of=as_of)["EUR"][bucket] == Decimal("100")
+    assert invoice_aging(as_of=date(2026,6,1))["EUR"]["total"] == Decimal("75")
 
 
 @pytest.mark.parametrize("amount", ["NaN", "Infinity", "-1", "0", "1.001", "1e50", 1.1])
