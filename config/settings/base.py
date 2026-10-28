@@ -1,6 +1,6 @@
 from pathlib import Path
 from dotenv import load_dotenv
-from os import getenv, path
+from os import W_OK, access, getenv, path
 from loguru import logger
 from datetime import timedelta, date
 import cloudinary
@@ -46,6 +46,7 @@ LOCAL_APPS = [
     "core_apps.user_profile",
     "core_apps.accounts",
     "core_apps.cards",
+    "core_apps.accounting",
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -265,6 +266,8 @@ LOGGING_CONFIG = None
 LOG_DIR = BASE_DIR / "logs"
 try:
     LOG_DIR.mkdir(parents=True, exist_ok=True)
+    if not access(LOG_DIR, W_OK):
+        raise OSError(f"Log directory is not writable: {LOG_DIR}")
 except OSError:
     # Source-mounted containers can be read-only for the unprivileged Django
     # user. Logging must not prevent the app or its isolated tests from starting.
