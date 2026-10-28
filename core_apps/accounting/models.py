@@ -5,6 +5,7 @@ from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
 from django.db import models, transaction
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
@@ -36,6 +37,32 @@ class ARQuerySet(GuardedQuerySet):
     label = "AR document"
 
 
+def _amount_sum(model, link, **filters):
+    """Correlated SUM(amount) per outer row; subqueries avoid join row multiplication."""
+    rows = (model.objects.filter(**{link: models.OuterRef("pk")}, **filters).order_by()
+            .values(link).annotate(total=models.Sum("amount")).values("total"))
+    return Coalesce(models.Subquery(rows), models.Value(Decimal("0.00")),
+                    output_field=models.DecimalField(max_digits=18, decimal_places=2))
+
+
+class InvoiceQuerySet(ARQuerySet):
+    def with_balances(self):
+        return self.annotate(allocated_total=_amount_sum(PaymentAllocation, "invoice"),
+                             credited_total=_amount_sum(CreditNote, "invoice"))
+
+
+class PaymentQuerySet(ARQuerySet):
+    def with_balances(self):
+        return self.annotate(allocated_total=_amount_sum(PaymentAllocation, "payment"),
+                             refunded_total=_amount_sum(PaymentRefund, "payment"))
+
+
+def _stored_total(obj, annotation, related):
+    if hasattr(obj, annotation):
+        return getattr(obj, annotation)
+    return getattr(obj, related).aggregate(total=models.Sum("amount"))["total"] or Decimal("0.00")
+
+
 class Customer(TimeStampedModel):
     name = models.CharField(max_length=200)
     email = models.EmailField(blank=True)
@@ -49,7 +76,7 @@ class Customer(TimeStampedModel):
 class Invoice(TimeStampedModel):
     """Lifecycle changes go through services; database triggers reject other writes."""
 
-    objects = ARQuerySet.as_manager()
+    objects = InvoiceQuerySet.as_manager()
 
     number = models.CharField(max_length=40, unique=True)
     customer = models.ForeignKey(Customer, on_delete=models.PROTECT, related_name="invoices")
@@ -111,10 +138,11 @@ class Invoice(TimeStampedModel):
 
     @property
     def open_balance(self):
+        """Current balance; use Invoice.objects.with_balances() to avoid per-row queries."""
         if self.status != "posted":
             return Decimal("0.00")
-        received = self.receipts.aggregate(total=models.Sum("amount"))["total"] or Decimal("0")
-        return self.posted_total - received
+        return (self.posted_total - _stored_total(self, "allocated_total", "allocations")
+                - _stored_total(self, "credited_total", "credit_notes"))
 
     def delete(self, *args, **kwargs):
         if Invoice.objects.filter(pk=self.pk).exclude(status="draft").exists():
@@ -164,27 +192,88 @@ class InvoiceLine(TimeStampedModel):
         return (self.quantity * self.unit_price).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
-class InvoiceReceipt(TimeStampedModel):
-    """One manual receipt allocated to one invoice; provider payments come later."""
+class AppendOnlyRecord(TimeStampedModel):
+    """Written once by services; corrections are new records. Triggers enforce this too."""
+
     objects = ARQuerySet.as_manager()
 
-    invoice = models.ForeignKey(Invoice, on_delete=models.PROTECT, related_name="receipts")
-    reference = models.CharField(max_length=100, unique=True)
-    amount = models.DecimalField(max_digits=18, decimal_places=2)
-    received_on = models.DateField()
-    journal_entry = models.OneToOneField("JournalEntry", on_delete=models.PROTECT)
-
     class Meta:
-        constraints = [models.CheckConstraint(check=models.Q(amount__gt=0), name="receipt_positive")]
+        abstract = True
 
     def save(self, *args, **kwargs):
-        if InvoiceReceipt.objects.filter(pk=self.pk).exists():
-            raise ValidationError("Receipts are immutable.")
+        if type(self).objects.filter(pk=self.pk).exists():
+            raise ValidationError(f"{self._meta.verbose_name.capitalize()} records are immutable.")
         self.full_clean()
         return super().save(*args, **kwargs)
 
     def delete(self, *args, **kwargs):
-        raise ValidationError("Receipts cannot be deleted.")
+        raise ValidationError(f"{self._meta.verbose_name.capitalize()} records cannot be deleted.")
+
+
+class CustomerPayment(AppendOnlyRecord):
+    """Money received from a customer. Posting credits AR in full; allocations apply it to invoices."""
+
+    objects = PaymentQuerySet.as_manager()
+
+    customer = models.ForeignKey(Customer, on_delete=models.PROTECT, related_name="payments")
+    reference = models.CharField(max_length=100, unique=True)
+    amount = models.DecimalField(max_digits=18, decimal_places=2)
+    currency = models.CharField(max_length=3)
+    received_on = models.DateField()
+    journal_entry = models.OneToOneField("JournalEntry", on_delete=models.PROTECT, related_name="customer_payment")
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(check=models.Q(amount__gt=0), name="customer_payment_positive"),
+            models.CheckConstraint(check=models.Q(currency__in=INVOICE_CURRENCIES),
+                                   name="customer_payment_currency_supported"),
+        ]
+
+    @property
+    def unapplied_amount(self):
+        """Customer credit still held in AR: not allocated to invoices and not refunded."""
+        return (self.amount - _stored_total(self, "allocated_total", "allocations")
+                - _stored_total(self, "refunded_total", "refunds"))
+
+
+class PaymentAllocation(AppendOnlyRecord):
+    """Applies part of a payment to an invoice. No ledger effect: the payment already credited AR."""
+
+    payment = models.ForeignKey(CustomerPayment, on_delete=models.PROTECT, related_name="allocations")
+    invoice = models.ForeignKey(Invoice, on_delete=models.PROTECT, related_name="allocations")
+    reference = models.CharField(max_length=100, unique=True)
+    amount = models.DecimalField(max_digits=18, decimal_places=2)
+    allocated_on = models.DateField()
+
+    class Meta:
+        constraints = [models.CheckConstraint(check=models.Q(amount__gt=0), name="payment_allocation_positive")]
+
+
+class PaymentRefund(AppendOnlyRecord):
+    """Returns unapplied customer credit: debit AR, credit cash."""
+
+    payment = models.ForeignKey(CustomerPayment, on_delete=models.PROTECT, related_name="refunds")
+    reference = models.CharField(max_length=100, unique=True)
+    amount = models.DecimalField(max_digits=18, decimal_places=2)
+    refunded_on = models.DateField()
+    journal_entry = models.OneToOneField("JournalEntry", on_delete=models.PROTECT, related_name="payment_refund")
+
+    class Meta:
+        constraints = [models.CheckConstraint(check=models.Q(amount__gt=0), name="payment_refund_positive")]
+
+
+class CreditNote(AppendOnlyRecord):
+    """Reduces a posted invoice's open balance: debit sales, credit AR."""
+
+    number = models.CharField(max_length=40, unique=True)
+    invoice = models.ForeignKey(Invoice, on_delete=models.PROTECT, related_name="credit_notes")
+    amount = models.DecimalField(max_digits=18, decimal_places=2)
+    issued_on = models.DateField()
+    reason = models.CharField(max_length=500)
+    journal_entry = models.OneToOneField("JournalEntry", on_delete=models.PROTECT, related_name="credit_note")
+
+    class Meta:
+        constraints = [models.CheckConstraint(check=models.Q(amount__gt=0), name="credit_note_positive")]
 
 
 class JournalQuerySet(GuardedQuerySet):

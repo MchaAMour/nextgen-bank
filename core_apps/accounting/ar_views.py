@@ -7,10 +7,11 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from django_filters.rest_framework import DjangoFilterBackend
 
-from .models import Customer, Invoice, InvoiceLine, InvoiceReceipt
+from .models import CreditNote, Customer, CustomerPayment, Invoice, InvoiceLine, PaymentAllocation, PaymentRefund
 from .permissions import AccountingPermission
-from .services import (cancel_invoice, create_draft_invoice, delete_draft_invoice, invoice_aging,
-    post_invoice, receive_invoice_payment, replace_draft_invoice)
+from .services import (allocate_payment, cancel_invoice, create_draft_invoice, delete_draft_invoice,
+    invoice_aging, issue_credit_note, post_invoice, record_customer_payment, refund_payment,
+    replace_draft_invoice)
 from .views import LedgerPagination
 
 
@@ -31,12 +32,20 @@ def run_service(service, *args, **kwargs):
         raise Conflict()
 
 
+def replay_aware(model, lookup, service, *args, **kwargs):
+    """201 when the service creates a record; 200 when an identical retry returns the original."""
+    replay = model.objects.filter(**lookup).exists()
+    record = run_service(service, *args, **kwargs)
+    return record, status.HTTP_200_OK if replay else status.HTTP_201_CREATED
+
+
 def validated(serializer_class, data):
     serializer = serializer_class(data=data)
     serializer.is_valid(raise_exception=True)
     data = dict(serializer.validated_data)
-    if "lines" in data:
-        data["lines"] = [dict(line) for line in data["lines"]]
+    for nested in ("lines", "allocations"):
+        if nested in data:
+            data[nested] = [dict(item) for item in data[nested]]
     return data
 
 
@@ -99,15 +108,63 @@ class CancellationInput(serializers.Serializer):
     cancellation_date = serializers.DateField()
 
 
-class ReceiptSerializer(serializers.ModelSerializer):
+class AllocationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PaymentAllocation
+        fields = ["id", "payment", "invoice", "reference", "amount", "allocated_on"]
+
+
+class RefundSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PaymentRefund
+        fields = ["id", "payment", "reference", "amount", "refunded_on", "journal_entry"]
+
+
+class PaymentSerializer(serializers.ModelSerializer):
+    unapplied_amount = serializers.DecimalField(max_digits=18, decimal_places=2, read_only=True)
+    allocations = AllocationSerializer(many=True, read_only=True)
+    refunds = RefundSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = CustomerPayment
+        fields = ["id", "customer", "reference", "amount", "currency", "received_on", "journal_entry",
+                  "unapplied_amount", "allocations", "refunds"]
+
+
+class AllocationInput(serializers.Serializer):
+    invoice = serializers.PrimaryKeyRelatedField(queryset=Invoice.objects.all())
+    amount = DecimalString(max_digits=18, decimal_places=2)
+    reference = serializers.CharField(max_length=100)
+
+
+class LaterAllocationInput(AllocationInput):
+    allocated_on = serializers.DateField()
+
+
+class PaymentInput(serializers.Serializer):
+    customer = serializers.PrimaryKeyRelatedField(queryset=Customer.objects.all())
+    reference = serializers.CharField(max_length=100)
+    amount = DecimalString(max_digits=18, decimal_places=2)
+    currency = serializers.CharField(max_length=3)
+    received_on = serializers.DateField()
+    allocations = AllocationInput(many=True, default=list)
+
+
+class RefundInput(serializers.Serializer):
+    reference = serializers.CharField(max_length=100)
+    amount = DecimalString(max_digits=18, decimal_places=2)
+    refunded_on = serializers.DateField()
+
+
+class CreditNoteSerializer(serializers.ModelSerializer):
     amount = DecimalString(max_digits=18, decimal_places=2)
 
     class Meta:
-        model = InvoiceReceipt
-        fields = ["id", "invoice", "reference", "amount", "received_on", "journal_entry"]
+        model = CreditNote
+        fields = ["id", "number", "invoice", "amount", "issued_on", "reason", "journal_entry"]
         read_only_fields = ["journal_entry"]
-        # Replays reuse a reference; the service decides between replay and conflict.
-        extra_kwargs = {"reference": {"validators": []}}
+        # Retries reuse a number; the service decides between replay and conflict.
+        extra_kwargs = {"number": {"validators": []}}
 
 
 class CustomerList(generics.ListCreateAPIView):
@@ -129,10 +186,11 @@ class CustomerDetail(generics.RetrieveUpdateAPIView):
 
 class InvoiceList(generics.ListCreateAPIView):
     permission_classes = [AccountingPermission]
-    required_permissions = ["accounting.view_invoice", "accounting.view_invoicereceipt"]
+    required_permissions = ["accounting.view_invoice", "accounting.view_paymentallocation",
+                            "accounting.view_creditnote"]
     write_permissions = {"POST": ["accounting.add_invoice"]}
     serializer_class = InvoiceSerializer
-    queryset = Invoice.objects.prefetch_related("lines").order_by("-issue_date", "id")
+    queryset = Invoice.objects.with_balances().prefetch_related("lines").order_by("-issue_date", "id")
     pagination_class = LedgerPagination
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ["customer", "status", "currency"]
@@ -169,7 +227,7 @@ class InvoiceAction(APIView):
         return get_object_or_404(Invoice, pk=pk)
 
     def respond(self, invoice):
-        invoice = Invoice.objects.prefetch_related("lines").get(pk=invoice.pk)
+        invoice = InvoiceList.queryset.get(pk=invoice.pk)
         return Response(InvoiceDetailSerializer(invoice).data)
 
 
@@ -188,23 +246,74 @@ class InvoiceCancel(InvoiceAction):
         return self.respond(run_service(cancel_invoice, self.invoice(pk), actor=request.user, **data))
 
 
-class ReceiptList(generics.ListCreateAPIView):
+class PaymentList(generics.ListCreateAPIView):
     permission_classes = [AccountingPermission]
-    required_permissions = ["accounting.view_invoicereceipt"]
-    write_permissions = {"POST": ["accounting.add_invoicereceipt"]}
-    serializer_class = ReceiptSerializer
-    queryset = InvoiceReceipt.objects.order_by("-received_on", "id")
+    required_permissions = ["accounting.view_customerpayment", "accounting.view_paymentallocation",
+                            "accounting.view_paymentrefund"]
+    write_permissions = {"POST": ["accounting.add_customerpayment", "accounting.add_paymentallocation"]}
+    serializer_class = PaymentSerializer
+    queryset = CustomerPayment.objects.with_balances().prefetch_related(
+        "allocations", "refunds").order_by("-received_on", "id")
+    pagination_class = LedgerPagination
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ["customer", "currency"]
+
+    def create(self, request, *args, **kwargs):
+        data = validated(PaymentInput, request.data)
+        payment, code = replay_aware(CustomerPayment, {"reference": data["reference"]},
+                                     record_customer_payment, data.pop("customer"), actor=request.user, **data)
+        return Response(PaymentSerializer(PaymentList.queryset.get(pk=payment.pk)).data, status=code)
+
+
+class PaymentDetail(generics.RetrieveAPIView):
+    permission_classes = [AccountingPermission]
+    required_permissions = PaymentList.required_permissions
+    serializer_class = PaymentSerializer
+    queryset = PaymentList.queryset
+
+
+class PaymentAllocationCreate(APIView):
+    """Apply a payment's unapplied credit to another invoice."""
+    permission_classes = [AccountingPermission]
+    required_permissions = PaymentList.required_permissions
+    write_permissions = {"POST": ["accounting.add_paymentallocation"]}
+
+    def post(self, request, pk):
+        payment = get_object_or_404(CustomerPayment, pk=pk)
+        data = validated(LaterAllocationInput, request.data)
+        allocation, code = replay_aware(PaymentAllocation, {"reference": data["reference"]},
+                                        allocate_payment, payment, **data)
+        return Response(AllocationSerializer(allocation).data, status=code)
+
+
+class PaymentRefundCreate(APIView):
+    permission_classes = [AccountingPermission]
+    required_permissions = PaymentList.required_permissions
+    write_permissions = {"POST": ["accounting.add_paymentrefund"]}
+
+    def post(self, request, pk):
+        payment = get_object_or_404(CustomerPayment, pk=pk)
+        data = validated(RefundInput, request.data)
+        refund, code = replay_aware(PaymentRefund, {"reference": data["reference"]},
+                                    refund_payment, payment, actor=request.user, **data)
+        return Response(RefundSerializer(refund).data, status=code)
+
+
+class CreditNoteList(generics.ListCreateAPIView):
+    permission_classes = [AccountingPermission]
+    required_permissions = ["accounting.view_creditnote"]
+    write_permissions = {"POST": ["accounting.add_creditnote"]}
+    serializer_class = CreditNoteSerializer
+    queryset = CreditNote.objects.order_by("-issued_on", "id")
     pagination_class = LedgerPagination
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ["invoice"]
 
     def create(self, request, *args, **kwargs):
-        """201 for a new receipt; 200 when an identical request replays an existing one."""
-        data = validated(ReceiptSerializer, request.data)
-        replay = InvoiceReceipt.objects.filter(reference=data["reference"]).exists()
-        receipt = run_service(receive_invoice_payment, data.pop("invoice"), actor=request.user, **data)
-        return Response(ReceiptSerializer(receipt).data,
-                        status=status.HTTP_200_OK if replay else status.HTTP_201_CREATED)
+        data = validated(CreditNoteSerializer, request.data)
+        note, code = replay_aware(CreditNote, {"number": data["number"]},
+                                  issue_credit_note, data.pop("invoice"), actor=request.user, **data)
+        return Response(CreditNoteSerializer(note).data, status=code)
 
 
 class AgingQuery(serializers.Serializer):
@@ -213,7 +322,8 @@ class AgingQuery(serializers.Serializer):
 
 class AgingReport(APIView):
     permission_classes = [AccountingPermission]
-    required_permissions = InvoiceList.required_permissions
+    required_permissions = InvoiceList.required_permissions + ["accounting.view_customerpayment",
+                                                               "accounting.view_paymentrefund"]
 
     def get(self, request):
         query = AgingQuery(data=request.query_params)

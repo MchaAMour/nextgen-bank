@@ -1,7 +1,8 @@
 from django.urls import path
 
-from .ar_views import (AgingReport, CustomerDetail, CustomerList, InvoiceCancel, InvoiceDetail,
-    InvoiceList, InvoicePost, ReceiptList)
+from .ar_views import (AgingReport, CreditNoteList, CustomerDetail, CustomerList, InvoiceCancel,
+    InvoiceDetail, InvoiceList, InvoicePost, PaymentAllocationCreate, PaymentDetail, PaymentList,
+    PaymentRefundCreate)
 from .views import AccountList, EntryList, EntryDetail, GeneralLedger, TrialBalance
 
 app_name = "accounting"
@@ -13,7 +14,11 @@ urlpatterns = [
     path("invoices/<uuid:pk>/", InvoiceDetail.as_view(), name="invoice-detail"),
     path("invoices/<uuid:pk>/post/", InvoicePost.as_view(), name="invoice-post"),
     path("invoices/<uuid:pk>/cancel/", InvoiceCancel.as_view(), name="invoice-cancel"),
-    path("receipts/", ReceiptList.as_view(), name="receipts"),
+    path("payments/", PaymentList.as_view(), name="payments"),
+    path("payments/<uuid:pk>/", PaymentDetail.as_view(), name="payment-detail"),
+    path("payments/<uuid:pk>/allocations/", PaymentAllocationCreate.as_view(), name="payment-allocations"),
+    path("payments/<uuid:pk>/refunds/", PaymentRefundCreate.as_view(), name="payment-refunds"),
+    path("credit-notes/", CreditNoteList.as_view(), name="credit-notes"),
     path("ar-aging/", AgingReport.as_view(), name="ar-aging"),
     path("accounts/", AccountList.as_view(), name="accounts"),
     path("entries/", EntryList.as_view(), name="entries"),

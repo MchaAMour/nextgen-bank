@@ -17,12 +17,12 @@ regression test or documented verification; record the evidence here.
 | AUTH-01 | Medium / open | Finance permissions currently require manual Group configuration. Add an idempotent role setup command with least-privilege tests. |
 | MONEY-01 | Medium / open | USD is a provisional example default; two decimal places are assumed. Confirm base currency and supported currency precision before payment integration. Tax/VAT requirements are undecided. |
 | OBS-01 | Low / open | Existing Django timezone and ReportLab deprecation warnings remain. Identify and address their sources during dependency maintenance. |
-| AR-01 | High / in progress | Invoice posting, unpaid cancellation, single-invoice manual receipts, historical aging, and protected read and write APIs now exist. Reusable payments with multiple allocations remain (see AR-05). Goal 3 is not complete. |
-| AR-06 | Medium / open | Invoice list balances currently aggregate receipts per invoice. Remove this N+1 query pattern and add query-count regression tests before large datasets. |
+| AR-01 | High / closed | Goal 3 scope delivered: drafts, posting, cancellation, reusable payments with multiple partial allocations, refunds, credit notes, historical aging reconciled to the AR ledger, database enforcement and protected APIs. Remaining AR items are tracked in AR-02, AR-04 and AR-05. |
+| AR-06 | Medium / closed | Invoice and payment lists annotate balances with correlated subqueries (`with_balances()`). `test_invoice_list_balances_use_constant_queries` caps a five-invoice list at 8 queries. |
 | AR-02 | Medium / partly addressed | Draft creation now re-reads and locks the customer. PostgreSQL concurrent deactivation tests remain; SQLite tests only verify persisted inactive customers are rejected. |
 | AR-03 | High / closed | Closed by migration 0005: lifecycle check constraints, SQLite/PostgreSQL triggers for invoices, lines and receipts, rejected bulk AR writes, and parent-locked draft line writes. Evidence under Completed safeguards. Journal-line equivalents remain INT-01/INT-02. |
-| AR-04 | Medium / partly addressed | Manual receipt reference is unique and sequential replay is idempotent. The receipts API maps IntegrityError from concurrent reuse to 409 for client retry (mocked test). A PostgreSQL concurrent-reuse test remains. |
-| AR-05 | Medium / open | Tax, refunds, credit notes, period closing, and payment-to-many-invoice allocations remain. Paid invoices currently cannot be cancelled. |
+| AR-04 | Medium / partly addressed | Payment, allocation and refund references and credit-note numbers are unique; identical sequential retries return the original record. The APIs map IntegrityError from concurrent reuse to 409 for client retry (mocked test). A PostgreSQL concurrent-reuse test remains. |
+| AR-05 | Medium / open | Tax (MONEY-01) and period closing remain. Invoices with allocations or credit notes cannot be cancelled, and allocations cannot be released, so a paid invoice cannot be corrected and refunded yet. Refunds, credit notes and payment-to-many-invoice allocations are done. |
 
 ## Completed safeguards
 
@@ -39,18 +39,28 @@ regression test or documented verification; record the evidence here.
   two-connection check showed a raw line insert waiting 2.0s for the posting
   lock, then rejected after posting.
 
+- AR settlements (migration `0006_ar_settlements`): payments, allocations,
+  refunds and credit notes are insert-only and checked against ledger entries
+  and open/unapplied balances by triggers. With the settlement triggers
+  removed, 9 raw-SQL tests in `test_ar_settlements.py` fail. Aging `net`
+  matches the AR ledger balance on three dates in a mixed scenario. A migration
+  test converts a legacy receipt into a one-allocation payment. One-off
+  PostgreSQL 16 run (throwaway container, not CI): 175 accounting tests passed;
+  0006 reversed and reapplied; two connections inserting raw allocations of 60
+  against a 100 invoice serialized (2.0s wait) and the second was rejected.
+
 ## Scope checkpoints
 
 - Ledger reporting is read-only; do not describe the ledger as production-ready.
-- AR is being built in smaller commits: draft documents first, then posting,
-  cancellation, payment allocation and aging. Goal 3 is incomplete until all
-  those workflows and their tests pass.
+- Goal 3 (AR) workflows and their tests pass on SQLite and in a one-off
+  PostgreSQL run. Without a PostgreSQL CI job (PG-01) and role setup
+  (AUTH-01), AR is not production-ready either.
 
 ## Latest verification
 
-AR write-API stage: `make test` ran 139 SQLite tests, all passed; `make check`
-reported no issues. A one-off PostgreSQL 16 run passed all 138 accounting tests
-(the SQLite-settings assertion fails by design). PG-01 (a PostgreSQL test job)
+AR settlement stage (Goal 3 complete): `make test` ran 176 SQLite tests, all
+passed; `make check` reported no issues. A one-off PostgreSQL 16 run passed all
+175 accounting tests (the SQLite-settings assertion fails by design). PG-01 (a PostgreSQL test job)
 remains open. Finance roles still need manual Group setup (AUTH-01).
 No PostgreSQL concurrency validation has been performed. Draft currency support
 is provisionally limited to USD, EUR and GBP, all with two decimal places;

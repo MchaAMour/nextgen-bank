@@ -7,7 +7,7 @@ from django.db import IntegrityError
 from django.db.models import Sum
 from rest_framework.test import APIClient
 
-from core_apps.accounting.models import Customer, Invoice, InvoiceReceipt, JournalEntry, JournalLine
+from core_apps.accounting.models import Customer, CustomerPayment, Invoice, JournalEntry, JournalLine
 from core_apps.accounting.services import post_invoice, receive_invoice_payment
 from .test_api import client, user
 from .test_ar_workflow import invoice
@@ -15,7 +15,8 @@ from .test_ar_workflow import invoice
 pytestmark = pytest.mark.django_db
 BASE = "/api/v1/accounting/"
 WRITE_PERMISSIONS = ["add_customer", "change_customer", "add_invoice", "change_invoice",
-                     "delete_invoice", "post_invoice", "cancel_invoice", "add_invoicereceipt"]
+                     "delete_invoice", "post_invoice", "cancel_invoice", "add_customerpayment",
+                     "add_paymentallocation", "add_paymentrefund", "add_creditnote"]
 
 
 def grant(user, *codenames):
@@ -33,6 +34,12 @@ def draft_payload(customer, **changes):
     return {"customer": str(customer.pk), "number": "API-1", "issue_date": "2026-01-01",
             "due_date": "2026-01-31", "currency": "USD",
             "lines": [{"description": "Work", "quantity": "2", "unit_price": "50.00"}], **changes}
+
+
+def payment_payload(customer, invoice_id, amount, reference, allocated=None):
+    return {"customer": str(customer.pk), "reference": reference, "amount": amount, "currency": "USD",
+            "received_on": "2026-01-15", "allocations": [
+                {"invoice": str(invoice_id), "amount": allocated or amount, "reference": f"{reference}-A"}]}
 
 
 def ledger_balanced():
@@ -62,14 +69,14 @@ def test_invoice_lifecycle_through_api(writer, user):
     assert (posted.data["status"], posted.data["open_balance"]) == ("posted", "150.00")
     assert JournalEntry.objects.get(pk=posted.data["journal_entry"]).posted_by == user
 
-    receipt = {"invoice": draft.data["id"], "reference": "API-R1", "amount": "40.00",
-               "received_on": "2026-01-15"}
-    assert writer.post(BASE + "receipts/", receipt, format="json").status_code == 201
-    assert writer.post(BASE + "receipts/", receipt, format="json").status_code == 200
-    assert writer.post(BASE + "receipts/", {**receipt, "amount": "41.00"}, format="json").status_code == 400
-    over = {**receipt, "reference": "API-R2", "amount": "110.01"}
-    assert writer.post(BASE + "receipts/", over, format="json").status_code == 400
-    assert InvoiceReceipt.objects.count() == 1
+    payment = payment_payload(customer, draft.data["id"], "40.00", reference="API-R1")
+    assert writer.post(BASE + "payments/", payment, format="json").status_code == 201
+    assert writer.post(BASE + "payments/", payment, format="json").status_code == 200
+    changed = payment_payload(customer, draft.data["id"], "41.00", reference="API-R1")
+    assert writer.post(BASE + "payments/", changed, format="json").status_code == 400
+    over = payment_payload(customer, draft.data["id"], "110.01", reference="API-R2")
+    assert writer.post(BASE + "payments/", over, format="json").status_code == 400
+    assert CustomerPayment.objects.count() == 1
     assert writer.get(url).data["open_balance"] == "110.00"
     assert JournalEntry.objects.count() == 2 and ledger_balanced()
 
@@ -82,7 +89,9 @@ def test_invoice_lifecycle_through_api(writer, user):
     ("delete", "invoices/{invoice}/", "delete_invoice"),
     ("post", "invoices/{invoice}/post/", "post_invoice"),
     ("post", "invoices/{invoice}/cancel/", "cancel_invoice"),
-    ("post", "receipts/", "add_invoicereceipt"),
+    ("post", "payments/", "add_customerpayment"),
+    ("post", "payments/", "add_paymentallocation"),
+    ("post", "credit-notes/", "add_creditnote"),
 ])
 def test_each_write_requires_its_own_permission(client, user, invoice, method, path, permission):
     grant(user, *(p for p in WRITE_PERMISSIONS if p != permission))
@@ -100,7 +109,7 @@ def test_each_write_requires_its_own_permission(client, user, invoice, method, p
 def test_unsupported_methods_return_405(writer, invoice):
     assert writer.patch(f"{BASE}invoices/{invoice.pk}/", {}, format="json").status_code == 405
     assert writer.delete(f"{BASE}customers/{invoice.customer.pk}/").status_code == 405
-    assert writer.delete(BASE + "receipts/").status_code == 405
+    assert writer.delete(BASE + "payments/").status_code == 405
 
 
 @pytest.mark.parametrize("field", ["quantity", "unit_price"])
@@ -112,12 +121,13 @@ def test_json_number_amounts_are_rejected(writer, invoice, field):
     assert not Invoice.objects.filter(number="API-F").exists()
 
 
-def test_json_number_receipt_amount_is_rejected(writer, invoice):
+def test_json_number_payment_amount_is_rejected(writer, invoice):
     post_invoice(invoice)
-    response = writer.post(BASE + "receipts/", {"invoice": str(invoice.pk), "reference": "F",
-                           "amount": 10.5, "received_on": "2026-01-02"}, format="json")
-    assert response.status_code == 400
-    assert not InvoiceReceipt.objects.exists()
+    payload = payment_payload(invoice.customer, invoice.pk, 10.5, reference="F", allocated="10.50")
+    assert writer.post(BASE + "payments/", payload, format="json").status_code == 400
+    payload = payment_payload(invoice.customer, invoice.pk, "10.50", reference="F", allocated=10.5)
+    assert writer.post(BASE + "payments/", payload, format="json").status_code == 400
+    assert not CustomerPayment.objects.exists()
 
 
 @pytest.mark.parametrize("changes", [{"due_date": "2025-12-31"}, {"currency": "JPY"}, {"lines": []},
@@ -182,7 +192,7 @@ def test_posting_failure_rolls_back(writer, invoice):
 
 def test_database_conflict_returns_409(writer, invoice):
     post_invoice(invoice)
-    with patch("core_apps.accounting.ar_views.receive_invoice_payment", side_effect=IntegrityError):
-        response = writer.post(BASE + "receipts/", {"invoice": str(invoice.pk), "reference": "C",
-                               "amount": "1.00", "received_on": "2026-01-02"}, format="json")
+    with patch("core_apps.accounting.ar_views.record_customer_payment", side_effect=IntegrityError):
+        response = writer.post(BASE + "payments/", payment_payload(invoice.customer, invoice.pk, "1.00", "C"),
+                               format="json")
     assert response.status_code == 409

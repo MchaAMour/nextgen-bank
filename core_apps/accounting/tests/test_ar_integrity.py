@@ -7,8 +7,8 @@ import pytest
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, connection, models, transaction
 
-from core_apps.accounting.models import ARQuerySet, Invoice, InvoiceLine, InvoiceReceipt
-from core_apps.accounting.services import (cancel_invoice, create_draft_invoice, post_invoice,
+from core_apps.accounting.models import ARQuerySet, CustomerPayment, Invoice, InvoiceLine, PaymentAllocation
+from core_apps.accounting.services import (_post_pair, cancel_invoice, create_draft_invoice, post_invoice,
     receive_invoice_payment)
 from .test_ar_workflow import DAY, invoice
 
@@ -35,15 +35,16 @@ def posted(invoice):
 
 
 @pytest.fixture
-def receipt(posted):
+def payment(posted):
     return receive_invoice_payment(posted, amount="40", reference="R-INT", received_on=DAY)
 
 
-@pytest.mark.parametrize("model", [Invoice, InvoiceLine, InvoiceReceipt])
+@pytest.mark.parametrize("model", [Invoice, InvoiceLine, CustomerPayment, PaymentAllocation])
 @pytest.mark.parametrize("operation", ["update", "delete", "bulk_update", "bulk_create"])
-def test_bulk_ar_writes_are_rejected(receipt, model, operation):
-    obj = {Invoice: receipt.invoice, InvoiceLine: receipt.invoice.lines.first(),
-           InvoiceReceipt: receipt}[model]
+def test_bulk_ar_writes_are_rejected(payment, model, operation):
+    allocation = payment.allocations.get()
+    obj = {Invoice: allocation.invoice, InvoiceLine: allocation.invoice.lines.first(),
+           CustomerPayment: payment, PaymentAllocation: allocation}[model]
     with pytest.raises(ValidationError, match="Bulk AR document"):
         if operation == "update":
             model.objects.filter(pk=obj.pk).update(updated_at=obj.updated_at)
@@ -84,25 +85,33 @@ def test_raw_sql_cannot_add_line_to_posted_invoice(posted):
 
 
 @pytest.mark.parametrize("sql", [
-    "UPDATE accounting_invoicereceipt SET amount = 1 WHERE id = %s",
-    "DELETE FROM accounting_invoicereceipt WHERE id = %s",
+    "UPDATE accounting_customerpayment SET amount = 1 WHERE id = %s",
+    "DELETE FROM accounting_customerpayment WHERE id = %s",
+    "UPDATE accounting_paymentallocation SET amount = 1 WHERE payment_id = %s",
+    "DELETE FROM accounting_paymentallocation WHERE payment_id = %s",
 ])
-def test_raw_sql_cannot_change_receipts(receipt, sql):
+def test_raw_sql_cannot_change_payments(payment, sql):
     with pytest.raises(IntegrityError):
-        raw(sql, db_id(receipt))
-    receipt.refresh_from_db()
-    assert receipt.amount == Decimal("40.00")
+        raw(sql, db_id(payment))
+    payment = CustomerPayment.objects.with_balances().get(pk=payment.pk)
+    assert (payment.amount, payment.allocated_total) == (Decimal("40.00"), Decimal("40.00"))
 
 
-@pytest.mark.parametrize("amount", ["60.01", "1"])
-def test_raw_receipt_insert_requires_open_balance_and_ar_credit(receipt, amount):
-    # 60.01 overpays; 1 has no matching AR credit in the invoice's own posting entry.
+@pytest.mark.parametrize("case", ["wrong_accounts", "wrong_amount"])
+def test_raw_payment_insert_requires_matching_ledger_entry(payment, case):
+    # An unused entry is required so the unique journal_entry column cannot be what rejects it.
+    if case == "wrong_accounts":
+        entry, amount = payment.allocations.get().invoice.journal_entry, Decimal("100.00")
+    else:
+        entry, amount = _post_pair(debit_code="1000", credit_code="1100", amount=Decimal("40.00"),
+            currency="USD", source_type="customer_payment", source_id=None, entry_date=DAY,
+            memo="Unused"), Decimal("60.01")
     with pytest.raises(IntegrityError):
-        raw("INSERT INTO accounting_invoicereceipt (id, created_at, updated_at, invoice_id, reference,"
-            " amount, received_on, journal_entry_id) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
-            new_id(), receipt.created_at, receipt.created_at, db_id(receipt.invoice), f"RAW-{amount}",
-            Decimal(amount), DAY, db_id(receipt.invoice.journal_entry))
-    assert InvoiceReceipt.objects.count() == 1
+        raw("INSERT INTO accounting_customerpayment (id, created_at, updated_at, customer_id, reference,"
+            " amount, currency, received_on, journal_entry_id) VALUES (%s, %s, %s, %s, %s, %s, 'USD', %s, %s)",
+            new_id(), payment.created_at, payment.created_at, db_id(payment.customer), f"RAW-{case}",
+            amount, DAY, db_id(entry))
+    assert CustomerPayment.objects.count() == 1
 
 
 def test_raw_sql_cannot_post_without_posted_entry(invoice):

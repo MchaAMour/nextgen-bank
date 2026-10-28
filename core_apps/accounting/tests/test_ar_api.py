@@ -11,7 +11,7 @@ pytestmark = pytest.mark.django_db
 BASE = "/api/v1/accounting/"
 
 
-@pytest.mark.parametrize("endpoint", ["customers/", "invoices/", "receipts/", "ar-aging/"])
+@pytest.mark.parametrize("endpoint", ["customers/", "invoices/", "payments/", "credit-notes/", "ar-aging/"])
 def test_ar_requires_permission(endpoint, user):
     api = APIClient()
     assert api.get(BASE + endpoint).status_code in (401, 403)
@@ -19,7 +19,7 @@ def test_ar_requires_permission(endpoint, user):
     assert api.get(BASE + endpoint).status_code == 403
 
 
-def test_invoice_balances_and_receipts(client, invoice):
+def test_invoice_balances_and_payments(client, invoice):
     invoice = post_invoice(invoice)
     receive_invoice_payment(invoice, amount="30", reference="AR-API", received_on=date(2026, 2, 1))
     response = client.get(BASE + "invoices/", {"status": "posted", "currency": "USD"})
@@ -28,8 +28,10 @@ def test_invoice_balances_and_receipts(client, invoice):
     row = response.data["results"][0]
     assert row["open_balance"] == "70.00"
     assert row["posted_total"] == "100.00"
-    response = client.get(BASE + "receipts/", {"invoice": str(invoice.pk)})
-    assert response.data["results"][0]["amount"] == "30.00"
+    response = client.get(BASE + "payments/", {"customer": str(invoice.customer.pk)})
+    payment = response.data["results"][0]
+    assert (payment["amount"], payment["unapplied_amount"]) == ("30.00", "0.00")
+    assert payment["allocations"][0]["invoice"] == invoice.pk
     assert client.get(BASE + "customers/").data["count"] == 1
     assert client.post(BASE + "invoices/", {}).status_code == 403
 

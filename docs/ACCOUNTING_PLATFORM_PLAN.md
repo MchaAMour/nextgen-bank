@@ -142,12 +142,13 @@ for routes, group setup, report semantics, and current limitations.
 
 ### Goal 3 — AR invoicing
 
-In progress: draft documents, invoice posting, unpaid cancellation via reversing
-entries, partial manual receipts, historical aging, database integrity
-enforcement, and protected read/write APIs implemented. Manual receipts
-currently apply to one invoice. Reusable payments with allocation records,
-refunds and credit notes remain. Totals round each line
-to two decimal places before summing. Drafts do not create journal entries.
+Implemented: draft documents, posting, cancellation via reversing entries,
+reusable customer payments with partial allocations across invoices, refunds of
+unapplied credit, credit notes, historical aging reconciled to the AR ledger,
+database integrity enforcement, and protected read/write APIs. See
+[AR workflows](AR_WORKFLOWS.md). Totals round each line to two decimal places
+before summing. Drafts do not create journal entries. Tax, period closing and
+correcting paid invoices remain open (AR-05).
 
 - Add customers, invoice drafts, invoice lines, posting, and cancellation.
 - Calculate invoice open balances and AR aging.
