@@ -1,3 +1,6 @@
+import logging
+
+import stripe
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import IntegrityError
 from django.shortcuts import get_object_or_404
@@ -7,12 +10,22 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from django_filters.rest_framework import DjangoFilterBackend
 
-from .models import CreditNote, Customer, CustomerPayment, Invoice, InvoiceLine, PaymentAllocation, PaymentRefund
+from .models import (CreditNote, Customer, CustomerPayment, Invoice, InvoiceLine, PaymentAllocation, PaymentRefund,
+    StripeCheckoutSession)
 from .permissions import AccountingPermission
 from .services import (allocate_payment, cancel_invoice, create_draft_invoice, delete_draft_invoice,
     invoice_aging, issue_credit_note, post_invoice, record_customer_payment, refund_payment,
     replace_draft_invoice)
+from .stripe_payments import create_invoice_checkout
 from .views import LedgerPagination
+
+logger = logging.getLogger(__name__)
+
+
+class StripeUnavailable(exceptions.APIException):
+    status_code = status.HTTP_502_BAD_GATEWAY
+    default_detail = "The payment provider could not create a checkout session; retry later."
+    default_code = "payment_provider_error"
 
 
 class Conflict(exceptions.APIException):
@@ -244,6 +257,25 @@ class InvoiceCancel(InvoiceAction):
     def post(self, request, pk):
         data = validated(CancellationInput, request.data)
         return self.respond(run_service(cancel_invoice, self.invoice(pk), actor=request.user, **data))
+
+
+class CheckoutSessionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = StripeCheckoutSession
+        fields = ["id", "invoice", "stripe_session_id", "url", "amount", "currency", "status", "expires_at"]
+
+
+class InvoiceCheckout(InvoiceAction):
+    """Create (or reuse) a Stripe Checkout Session for the invoice's open balance."""
+    write_permissions = {"POST": ["accounting.add_stripecheckoutsession"]}
+
+    def post(self, request, pk):
+        try:
+            session = run_service(create_invoice_checkout, self.invoice(pk), actor=request.user)
+        except stripe.StripeError:
+            logger.exception("Stripe Checkout Session creation failed")
+            raise StripeUnavailable()
+        return Response(CheckoutSessionSerializer(session).data, status=status.HTTP_201_CREATED)
 
 
 class PaymentList(generics.ListCreateAPIView):

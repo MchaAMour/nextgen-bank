@@ -276,6 +276,66 @@ class CreditNote(AppendOnlyRecord):
         constraints = [models.CheckConstraint(check=models.Q(amount__gt=0), name="credit_note_positive")]
 
 
+class StripeCheckoutSession(TimeStampedModel):
+    """A Stripe Checkout Session for an invoice's open balance when it was created.
+
+    Webhooks, not the success page, move it to paid and record the payment.
+    """
+
+    class Status(models.TextChoices):
+        OPEN = "open", _("Open")
+        AWAITING_PAYMENT = "awaiting_payment", _("Completed, awaiting asynchronous payment")
+        PAID = "paid", _("Paid")
+        FAILED = "failed", _("Payment failed")
+        EXPIRED = "expired", _("Expired")
+
+    ACTIVE = [Status.OPEN, Status.AWAITING_PAYMENT]
+
+    invoice = models.ForeignKey(Invoice, on_delete=models.PROTECT, related_name="stripe_sessions")
+    stripe_session_id = models.CharField(max_length=255, unique=True)
+    url = models.URLField(max_length=2000)
+    amount = models.DecimalField(max_digits=18, decimal_places=2)
+    currency = models.CharField(max_length=3)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.OPEN)
+    expires_at = models.DateTimeField()
+    payment_intent_id = models.CharField(max_length=255, blank=True)
+    payment = models.OneToOneField(CustomerPayment, null=True, blank=True, on_delete=models.PROTECT,
+                                   related_name="stripe_session")
+    created_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL,
+                                   related_name="stripe_checkout_sessions")
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(check=models.Q(amount__gt=0), name="stripe_session_amount_positive"),
+            models.UniqueConstraint(fields=["invoice"], condition=models.Q(status__in=["open", "awaiting_payment"]),
+                                    name="stripe_session_one_active_per_invoice"),
+            models.CheckConstraint(check=models.Q(status="paid", payment__isnull=False)
+                                   | (~models.Q(status="paid") & models.Q(payment__isnull=True)),
+                                   name="stripe_session_paid_has_payment"),
+        ]
+
+
+class StripeWebhookEvent(TimeStampedModel):
+    """Each verified Stripe event is stored once; replays of a finished event change nothing."""
+
+    class Status(models.TextChoices):
+        RECEIVED = "received", _("Received")
+        PROCESSED = "processed", _("Processed")
+        IGNORED = "ignored", _("Ignored")
+        FAILED = "failed", _("Failed")
+
+    FINISHED = [Status.PROCESSED, Status.IGNORED]
+
+    event_id = models.CharField(max_length=255, unique=True)
+    event_type = models.CharField(max_length=100)
+    livemode = models.BooleanField()
+    payload = models.JSONField()
+    status = models.CharField(max_length=10, choices=Status.choices, default=Status.RECEIVED)
+    error = models.TextField(blank=True)
+    attempts = models.PositiveIntegerField(default=0)
+    processed_at = models.DateTimeField(null=True, blank=True)
+
+
 class JournalQuerySet(GuardedQuerySet):
     label = "journal"
 

@@ -12,6 +12,12 @@ services:
             - "8000"
         env_file:
             - ./.envs/.env.local
+            # Stripe test credentials live outside the repository. The listen file holds
+            # the `stripe listen` signing secret (make stripe-webhook-secret) and overrides.
+            - path: ../.env-stripe
+              required: false
+            - path: ../.env-stripe-listen
+              required: false
         depends_on:
             - postgres
             - mailpit

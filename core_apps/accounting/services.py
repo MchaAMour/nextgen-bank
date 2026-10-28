@@ -176,15 +176,21 @@ def cancel_invoice(invoice, *, cancellation_date, actor=None):
     return invoice
 
 
+CASH_ACCOUNTS = {"1000", "1010"}  # Cash and bank; Stripe clearing until payout reconciliation.
+
+
 @transaction.atomic
-def record_customer_payment(customer, *, amount, currency, reference, received_on, allocations=(), actor=None):
-    """Post money received (debit cash, credit AR) and apply it to invoices atomically.
+def record_customer_payment(customer, *, amount, currency, reference, received_on, allocations=(), actor=None,
+                            cash_account="1000"):
+    """Post money received (debit cash_account, credit AR) and apply it to invoices atomically.
 
     Each allocation is a dict with invoice, amount and its own unique reference. A
     retry with identical details, including every requested allocation, returns the
     original payment. Any unallocated amount remains customer credit in AR.
     """
     amount = _money(amount, "Payment")
+    if cash_account not in CASH_ACCOUNTS:
+        raise ValidationError("Payments must debit cash and bank or Stripe clearing.")
     allocations = list(allocations)
     existing = _replay(CustomerPayment, {"reference": reference}, {"customer_id": customer.pk,
         "amount": amount, "currency": currency, "received_on": received_on}, "Payment reference")
@@ -198,7 +204,7 @@ def record_customer_payment(customer, *, amount, currency, reference, received_o
         return existing
     payment = CustomerPayment(customer=customer, reference=reference, amount=amount,
                               currency=currency, received_on=received_on)
-    payment.journal_entry = _post_pair(debit_code="1000", credit_code="1100", amount=amount, currency=currency,
+    payment.journal_entry = _post_pair(debit_code=cash_account, credit_code="1100", amount=amount, currency=currency,
         source_type="customer_payment", source_id=payment.pk, entry_date=received_on,
         memo=f"Payment {reference}", actor=actor)
     payment.save()

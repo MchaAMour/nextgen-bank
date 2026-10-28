@@ -1,8 +1,9 @@
 from django.urls import path
 
 from .ar_views import (AgingReport, CreditNoteList, CustomerDetail, CustomerList, InvoiceCancel,
-    InvoiceDetail, InvoiceList, InvoicePost, PaymentAllocationCreate, PaymentDetail, PaymentList,
-    PaymentRefundCreate)
+    InvoiceCheckout, InvoiceDetail, InvoiceList, InvoicePost, PaymentAllocationCreate, PaymentDetail,
+    PaymentList, PaymentRefundCreate)
+from .stripe_views import StripeWebhook
 from .views import AccountList, EntryList, EntryDetail, GeneralLedger, TrialBalance
 
 app_name = "accounting"
@@ -14,6 +15,8 @@ urlpatterns = [
     path("invoices/<uuid:pk>/", InvoiceDetail.as_view(), name="invoice-detail"),
     path("invoices/<uuid:pk>/post/", InvoicePost.as_view(), name="invoice-post"),
     path("invoices/<uuid:pk>/cancel/", InvoiceCancel.as_view(), name="invoice-cancel"),
+    path("invoices/<uuid:pk>/checkout/", InvoiceCheckout.as_view(), name="invoice-checkout"),
+    path("stripe/webhook/", StripeWebhook.as_view(), name="stripe-webhook"),
     path("payments/", PaymentList.as_view(), name="payments"),
     path("payments/<uuid:pk>/", PaymentDetail.as_view(), name="payment-detail"),
     path("payments/<uuid:pk>/allocations/", PaymentAllocationCreate.as_view(), name="payment-allocations"),

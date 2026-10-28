@@ -259,6 +259,15 @@ COOKIE_SECURE = getenv("COOKIE_SECURE", "True") == "True"
 STRIPE_SECRET_KEY = getenv("STRIPE_SECRET_KEY", "")
 STRIPE_PUBLISHABLE_KEY = getenv("STRIPE_PUBLISHABLE_KEY", "")
 STRIPE_WEBHOOK_SECRET = getenv("STRIPE_WEBHOOK_SECRET", "")
+# Where Stripe Checkout returns the customer. Display only: payments are
+# recorded from signed webhooks, never from these pages.
+STRIPE_CHECKOUT_SUCCESS_URL = getenv(
+    "STRIPE_CHECKOUT_SUCCESS_URL",
+    "http://localhost:8080/payments/success?session_id={CHECKOUT_SESSION_ID}",
+)
+STRIPE_CHECKOUT_CANCEL_URL = getenv(
+    "STRIPE_CHECKOUT_CANCEL_URL", "http://localhost:8080/payments/cancelled"
+)
 ACCOUNTING_BASE_CURRENCY = getenv("ACCOUNTING_BASE_CURRENCY", "USD")
 
 LOGGING_CONFIG = None

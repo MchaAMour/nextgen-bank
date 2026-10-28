@@ -17,6 +17,10 @@ regression test or documented verification; record the evidence here.
 | AUTH-01 | Medium / open | Finance permissions currently require manual Group configuration. Add an idempotent role setup command with least-privilege tests. |
 | MONEY-01 | Medium / open | USD is a provisional example default; two decimal places are assumed. Confirm base currency and supported currency precision before payment integration. Tax/VAT requirements are undecided. |
 | OBS-01 | Low / open | Existing Django timezone and ReportLab deprecation warnings remain. Identify and address their sources during dependency maintenance. |
+| STRIPE-01 | Medium / open | `STRIPE_SECRET_KEY` is a full test-mode secret key. Before any shared or deployed environment, replace it with a restricted key (`rk_`) limited to Checkout Sessions (write) and keep it in a secrets vault. |
+| STRIPE-02 | High / open | Stripe payments debit clearing (1010), which is not yet reconciled: Stripe fees, payouts, refunds and disputes are not recorded. Required before live mode (Goal 6). |
+| STRIPE-03 | Medium / open | Webhooks are only set up locally through `stripe listen`. A public deployment needs a Dashboard endpoint with its own signing secret, and an allowlist of Stripe webhook IP addresses. |
+| STRIPE-04 | Medium / open | No end-to-end run against the Stripe test API yet: unit tests mock the API client (webhook signatures are verified for real). Run one Checkout payment through `stripe listen` once a valid key is configured. |
 | AR-01 | High / closed | Goal 3 scope delivered: drafts, posting, cancellation, reusable payments with multiple partial allocations, refunds, credit notes, historical aging reconciled to the AR ledger, database enforcement and protected APIs. Remaining AR items are tracked in AR-02, AR-04 and AR-05. |
 | AR-06 | Medium / closed | Invoice and payment lists annotate balances with correlated subqueries (`with_balances()`). `test_invoice_list_balances_use_constant_queries` caps a five-invoice list at 8 queries. |
 | AR-02 | Medium / partly addressed | Draft creation now re-reads and locks the customer. PostgreSQL concurrent deactivation tests remain; SQLite tests only verify persisted inactive customers are rejected. |
@@ -49,6 +53,16 @@ regression test or documented verification; record the evidence here.
   0006 reversed and reapplied; two connections inserting raw allocations of 60
   against a 100 invoice serialized (2.0s wait) and the second was rejected.
 
+- Stripe Checkout (migration `0007_stripe_checkout`): 19 tests in
+  `test_stripe_payments.py` cover session creation, reuse and replacement,
+  signed and forged webhooks, replays, delayed payment success and failure,
+  expiry, overpayment credit, ignored and failed events with retry. A bug found
+  while writing them: forged signatures were accepted in tests because
+  verification went through the mocked API client; verification now uses
+  `stripe.Webhook.construct_event`, which needs only the signing secret. One-off
+  PostgreSQL 16 run: 194 accounting tests passed; 0006 and 0007 reversed and
+  reapplied.
+
 ## Scope checkpoints
 
 - Ledger reporting is read-only; do not describe the ledger as production-ready.
@@ -58,9 +72,10 @@ regression test or documented verification; record the evidence here.
 
 ## Latest verification
 
-AR settlement stage (Goal 3 complete): `make test` ran 176 SQLite tests, all
-passed; `make check` reported no issues. A one-off PostgreSQL 16 run passed all
-175 accounting tests (the SQLite-settings assertion fails by design). PG-01 (a PostgreSQL test job)
+Stripe Checkout stage (Goal 4): `make test` ran 195 SQLite tests, all passed;
+`make check` reported no issues. A one-off PostgreSQL 16 run passed all 194
+accounting tests (the SQLite-settings assertion fails by design). No live
+Stripe test-API run yet (STRIPE-04). PG-01 (a PostgreSQL test job)
 remains open. Finance roles still need manual Group setup (AUTH-01).
 No PostgreSQL concurrency validation has been performed. Draft currency support
 is provisionally limited to USD, EUR and GBP, all with two decimal places;
