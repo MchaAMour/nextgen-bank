@@ -17,11 +17,11 @@ regression test or documented verification; record the evidence here.
 | AUTH-01 | Medium / open | Finance permissions currently require manual Group configuration. Add an idempotent role setup command with least-privilege tests. |
 | MONEY-01 | Medium / open | USD is a provisional example default; two decimal places are assumed. Confirm base currency and supported currency precision before payment integration. Tax/VAT requirements are undecided. |
 | OBS-01 | Low / open | Existing Django timezone and ReportLab deprecation warnings remain. Identify and address their sources during dependency maintenance. |
-| AR-01 | High / in progress | Invoice posting, unpaid cancellation, single-invoice manual receipts, historical aging and protected read APIs now exist. Write APIs and reusable payments with multiple allocations remain. Goal 3 is not complete. |
+| AR-01 | High / in progress | Invoice posting, unpaid cancellation, single-invoice manual receipts, historical aging, and protected read and write APIs now exist. Reusable payments with multiple allocations remain (see AR-05). Goal 3 is not complete. |
 | AR-06 | Medium / open | Invoice list balances currently aggregate receipts per invoice. Remove this N+1 query pattern and add query-count regression tests before large datasets. |
 | AR-02 | Medium / partly addressed | Draft creation now re-reads and locks the customer. PostgreSQL concurrent deactivation tests remain; SQLite tests only verify persisted inactive customers are rejected. |
 | AR-03 | High / closed | Closed by migration 0005: lifecycle check constraints, SQLite/PostgreSQL triggers for invoices, lines and receipts, rejected bulk AR writes, and parent-locked draft line writes. Evidence under Completed safeguards. Journal-line equivalents remain INT-01/INT-02. |
-| AR-04 | Medium / open | Manual receipt reference is unique and sequential replay is idempotent. Concurrent cross-invoice reuse can raise IntegrityError; define retry/conflict handling and test with PostgreSQL. |
+| AR-04 | Medium / partly addressed | Manual receipt reference is unique and sequential replay is idempotent. The receipts API maps IntegrityError from concurrent reuse to 409 for client retry (mocked test). A PostgreSQL concurrent-reuse test remains. |
 | AR-05 | Medium / open | Tax, refunds, credit notes, period closing, and payment-to-many-invoice allocations remain. Paid invoices currently cannot be cancelled. |
 
 ## Completed safeguards
@@ -48,9 +48,10 @@ regression test or documented verification; record the evidence here.
 
 ## Latest verification
 
-AR integrity stage: `make test` ran 114 SQLite tests, all passed; `make check`
-reported no issues. PostgreSQL verification was a manual one-off; PG-01 (a
-PostgreSQL test job) remains open.
+AR write-API stage: `make test` ran 139 SQLite tests, all passed; `make check`
+reported no issues. A one-off PostgreSQL 16 run passed all 138 accounting tests
+(the SQLite-settings assertion fails by design). PG-01 (a PostgreSQL test job)
+remains open. Finance roles still need manual Group setup (AUTH-01).
 No PostgreSQL concurrency validation has been performed. Draft currency support
 is provisionally limited to USD, EUR and GBP, all with two decimal places;
 this is not a decision about the eventual business's base currency or taxes.

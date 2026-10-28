@@ -31,7 +31,7 @@ def test_invoice_balances_and_receipts(client, invoice):
     response = client.get(BASE + "receipts/", {"invoice": str(invoice.pk)})
     assert response.data["results"][0]["amount"] == "30.00"
     assert client.get(BASE + "customers/").data["count"] == 1
-    assert client.post(BASE + "invoices/", {}).status_code == 405
+    assert client.post(BASE + "invoices/", {}).status_code == 403
 
 
 def test_historical_ar_api(client, invoice):

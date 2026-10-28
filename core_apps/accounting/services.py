@@ -8,23 +8,62 @@ from django.utils import timezone
 from .models import Customer, ChartOfAccount, Invoice, InvoiceLine, InvoiceReceipt, JournalEntry, JournalLine
 
 
-@transaction.atomic
-def create_draft_invoice(*, customer, number, issue_date, due_date, lines, currency="USD"):
-    """Create a complete draft atomically, without recording revenue or AR yet."""
+def _active_customer(customer):
     customer = Customer.objects.select_for_update().get(pk=customer.pk)
     if not customer.is_active:
         raise ValidationError("Cannot invoice an inactive customer.")
+    return customer
+
+
+def _required_lines(lines):
     lines = list(lines)
     if not lines:
         raise ValidationError("An invoice requires at least one line.")
-    invoice = Invoice.objects.create(customer=customer, number=number,
-                                     issue_date=issue_date, due_date=due_date, currency=currency)
+    return lines
+
+
+def _add_invoice_lines(invoice, lines):
     for line in lines:
         for field in ("quantity", "unit_price"):
             if isinstance(line.get(field), (float, bool)):
                 raise ValidationError("Use Decimal or decimal strings for invoice amounts.")
         InvoiceLine.objects.create(invoice=invoice, **line)
+
+
+@transaction.atomic
+def create_draft_invoice(*, customer, number, issue_date, due_date, lines, currency="USD"):
+    """Create a complete draft atomically, without recording revenue or AR yet."""
+    customer = _active_customer(customer)
+    lines = _required_lines(lines)
+    invoice = Invoice.objects.create(customer=customer, number=number,
+                                     issue_date=issue_date, due_date=due_date, currency=currency)
+    _add_invoice_lines(invoice, lines)
     return invoice
+
+
+@transaction.atomic
+def replace_draft_invoice(invoice, *, customer, number, issue_date, due_date, lines, currency="USD"):
+    """Replace a draft's header and lines under the posting lock, without ledger effect."""
+    invoice = Invoice.objects.select_for_update().get(pk=invoice.pk)
+    if invoice.status != "draft":
+        raise ValidationError("Only draft invoices can be edited.")
+    customer = _active_customer(customer)
+    lines = _required_lines(lines)
+    for line in invoice.lines.all():
+        line.delete()
+    invoice.customer, invoice.number, invoice.currency = customer, number, currency
+    invoice.issue_date, invoice.due_date = issue_date, due_date
+    invoice.save()
+    _add_invoice_lines(invoice, lines)
+    return invoice
+
+
+@transaction.atomic
+def delete_draft_invoice(invoice):
+    invoice = Invoice.objects.select_for_update().get(pk=invoice.pk)
+    if invoice.status != "draft":
+        raise ValidationError("Only draft invoices can be deleted.")
+    invoice.delete()
 
 User = get_user_model()
 

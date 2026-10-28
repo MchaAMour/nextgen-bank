@@ -7,6 +7,8 @@ yet supported. Use decimal strings or Decimal for amounts.
 | Service | Accounting effect |
 | --- | --- |
 | `create_draft_invoice` | No ledger entry |
+| `replace_draft_invoice` | No ledger entry; replaces a draft's header and lines |
+| `delete_draft_invoice` | No ledger entry; drafts only |
 | `post_invoice` | Debit AR (1100), credit sales (4000) |
 | `receive_invoice_payment` | Debit bank/cash (1000), credit AR (1100) |
 | `cancel_invoice` | Unpaid posted invoice: debit sales, credit AR; link to original entry |
@@ -39,9 +41,11 @@ Draft line writes lock the parent invoice row like `post_invoice`; on
 PostgreSQL the line trigger also takes a share lock, so a line write and a
 posting cannot interleave. Violations raise `IntegrityError`.
 
-## Read APIs
+## APIs
 
-All routes start with `/api/v1/accounting/`. GET only:
+All routes start with `/api/v1/accounting/`.
+
+### Read
 
 - `customers/`: requires `view_customer`.
 - `invoices/`: requires `view_invoice` and `view_invoicereceipt`; filter by
@@ -57,11 +61,36 @@ balances. On the due date an invoice is current, not overdue.
 
 Invoice lists expose current open balances, not historical balances. Drafts
 and cancelled invoices have zero current open balance. A paid invoice remains
-posted with zero open balance.
+posted with zero open balance. `customers/<id>/` and `invoices/<id>/` return one
+record; invoice detail includes its lines.
+
+### Write
+
+Every write goes through the services above and needs its own permission:
+
+| Route | Method | Permission | Effect |
+| --- | --- | --- | --- |
+| `customers/` | POST | `add_customer` | Create a customer |
+| `customers/<id>/` | PUT, PATCH | `change_customer` | Update name, email or active flag |
+| `invoices/` | POST | `add_invoice` | Create a draft with its lines |
+| `invoices/<id>/` | PUT | `change_invoice` | Replace a draft's header and all lines |
+| `invoices/<id>/` | DELETE | `delete_invoice` | Delete a draft |
+| `invoices/<id>/post/` | POST | `post_invoice` | Post a draft (debit AR, credit sales) |
+| `invoices/<id>/cancel/` | POST | `cancel_invoice` | Body `{"cancellation_date"}`; unpaid only |
+| `receipts/` | POST | `add_invoicereceipt` | Body `{"invoice", "reference", "amount", "received_on"}` |
+
+Send amounts (`quantity`, `unit_price`, `amount`) as decimal strings; JSON
+numbers are rejected. Business-rule failures (non-draft edits, overpayment,
+inactive customer, reused receipt reference with different details) return
+400. A receipt replay with identical details returns 200 and the original
+receipt; a new receipt returns 201. Database conflicts such as concurrent
+reuse of a reference return 409 and can be retried. Invoice PATCH is not
+supported; PUT sends the complete draft. Posting and receipts record the
+requesting user as `posted_by` on the journal entry.
 
 ## Remaining work
 
-Goal 3 remains in progress: write APIs, credit notes/refunds and reusable
-payments with multiple allocations.
+Goal 3 remains in progress: credit notes/refunds and reusable payments with
+multiple allocations.
 See [Engineering follow-ups](ENGINEERING_FOLLOW_UPS.md). SQLite tests do not
 establish PostgreSQL concurrency correctness. No Stripe integration exists yet.

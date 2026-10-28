@@ -143,9 +143,10 @@ for routes, group setup, report semantics, and current limitations.
 ### Goal 3 — AR invoicing
 
 In progress: draft documents, invoice posting, unpaid cancellation via reversing
-entries, partial manual receipts and historical aging services implemented.
-Manual receipts currently apply to one invoice. Protected APIs, reusable payments
-with allocation records, refunds and credit notes remain. Totals round each line
+entries, partial manual receipts, historical aging, database integrity
+enforcement, and protected read/write APIs implemented. Manual receipts
+currently apply to one invoice. Reusable payments with allocation records,
+refunds and credit notes remain. Totals round each line
 to two decimal places before summing. Drafts do not create journal entries.
 
 - Add customers, invoice drafts, invoice lines, posting, and cancellation.
