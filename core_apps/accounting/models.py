@@ -4,13 +4,36 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
-from django.db import models
+from django.db import models, transaction
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
 from core_apps.common.models import TimeStampedModel
 
 User = get_user_model()
+INVOICE_CURRENCIES = ("USD", "EUR", "GBP")
+
+
+class GuardedQuerySet(models.QuerySet):
+    """Bulk writes bypass instance validation; require validated instance writes."""
+
+    label = "record"
+
+    def update(self, **kwargs):
+        raise ValidationError(f"Bulk {self.label} updates are prohibited.")
+
+    def delete(self):
+        raise ValidationError(f"Bulk {self.label} deletion is prohibited.")
+
+    def bulk_update(self, objs, fields, **kwargs):
+        raise ValidationError(f"Bulk {self.label} updates are prohibited.")
+
+    def bulk_create(self, objs, **kwargs):
+        raise ValidationError(f"Bulk {self.label} creation is prohibited.")
+
+
+class ARQuerySet(GuardedQuerySet):
+    label = "AR document"
 
 
 class Customer(TimeStampedModel):
@@ -24,7 +47,9 @@ class Customer(TimeStampedModel):
 
 
 class Invoice(TimeStampedModel):
-    """Draft document only; ledger posting is a subsequent implementation stage."""
+    """Lifecycle changes go through services; database triggers reject other writes."""
+
+    objects = ARQuerySet.as_manager()
 
     number = models.CharField(max_length=40, unique=True)
     customer = models.ForeignKey(Customer, on_delete=models.PROTECT, related_name="invoices")
@@ -39,19 +64,45 @@ class Invoice(TimeStampedModel):
     cancellation_entry = models.OneToOneField("JournalEntry", null=True, blank=True,
                                              on_delete=models.PROTECT, related_name="cancelled_invoice")
 
+    class Meta:
+        permissions = [("post_invoice", "Can post invoices"), ("cancel_invoice", "Can cancel invoices")]
+        constraints = [
+            models.CheckConstraint(check=models.Q(due_date__gte=models.F("issue_date")),
+                                   name="invoice_due_not_before_issue"),
+            models.CheckConstraint(check=models.Q(currency__in=INVOICE_CURRENCIES),
+                                   name="invoice_currency_supported"),
+            models.CheckConstraint(name="invoice_lifecycle_consistent", check=(
+                models.Q(status="draft", journal_entry__isnull=True, posted_total__isnull=True,
+                         cancellation_entry__isnull=True)
+                | models.Q(status="posted", journal_entry__isnull=False, posted_total__gt=0,
+                           cancellation_entry__isnull=True)
+                | models.Q(status="cancelled", journal_entry__isnull=True, posted_total__isnull=True,
+                           cancellation_entry__isnull=True)
+                | models.Q(status="cancelled", journal_entry__isnull=False, posted_total__gt=0,
+                           cancellation_entry__isnull=False))),
+        ]
+
     def clean(self):
         super().clean()
         if self.issue_date and self.due_date and self.due_date < self.issue_date:
             raise ValidationError({"due_date": "Due date must not precede issue date."})
-        if self.currency not in ("USD", "EUR", "GBP"):
+        if self.currency not in INVOICE_CURRENCIES:
             raise ValidationError({"currency": "Draft invoices currently support USD, EUR and GBP."})
 
+    @transaction.atomic
     def save(self, *args, **kwargs):
-        original = Invoice.objects.filter(pk=self.pk).first()
+        # Lock the stored row so a stale draft object cannot overwrite a concurrent posting.
+        original = Invoice.objects.select_for_update().filter(pk=self.pk).first()
         if original and original.status != "draft":
             raise ValidationError("Posted invoices must be changed through accounting services.")
         self.full_clean()
         return super().save(*args, **kwargs)
+
+    def _apply_transition(self, **fields):
+        """Service-only lifecycle change; the caller holds the row lock and triggers validate it."""
+        for name, value in fields.items():
+            setattr(self, name, value)
+        super().save(update_fields=[*fields, "updated_at"])
 
     @property
     def total(self):
@@ -71,7 +122,17 @@ class Invoice(TimeStampedModel):
         return super().delete(*args, **kwargs)
 
 
+def _lock_draft_invoices(*invoice_ids, message):
+    """Share the posting service's parent row lock before changing draft lines."""
+    statuses = Invoice.objects.select_for_update().filter(
+        pk__in=[pk for pk in invoice_ids if pk]).values_list("status", flat=True)
+    if any(status != "draft" for status in statuses):
+        raise ValidationError(message)
+
+
 class InvoiceLine(TimeStampedModel):
+    objects = ARQuerySet.as_manager()
+
     invoice = models.ForeignKey(Invoice, on_delete=models.CASCADE, related_name="lines")
     description = models.CharField(max_length=500)
     quantity = models.DecimalField(max_digits=10, decimal_places=3,
@@ -85,17 +146,17 @@ class InvoiceLine(TimeStampedModel):
             models.CheckConstraint(check=models.Q(unit_price__gte=0), name="invoice_price_nonnegative"),
         ]
 
+    @transaction.atomic
     def save(self, *args, **kwargs):
         original_parent = InvoiceLine.objects.filter(pk=self.pk).values_list("invoice_id", flat=True).first()
-        if Invoice.objects.filter(pk__in=[original_parent, self.invoice_id]).exclude(status="draft").exists():
-            raise ValidationError("Posted invoice lines are immutable.")
+        _lock_draft_invoices(original_parent, self.invoice_id, message="Posted invoice lines are immutable.")
         self.full_clean()
         return super().save(*args, **kwargs)
 
+    @transaction.atomic
     def delete(self, *args, **kwargs):
         parent = InvoiceLine.objects.filter(pk=self.pk).values_list("invoice_id", flat=True).first()
-        if Invoice.objects.filter(pk=parent).exclude(status="draft").exists():
-            raise ValidationError("Posted invoice lines are immutable.")
+        _lock_draft_invoices(parent, message="Posted invoice lines are immutable.")
         return super().delete(*args, **kwargs)
 
     @property
@@ -105,6 +166,8 @@ class InvoiceLine(TimeStampedModel):
 
 class InvoiceReceipt(TimeStampedModel):
     """One manual receipt allocated to one invoice; provider payments come later."""
+    objects = ARQuerySet.as_manager()
+
     invoice = models.ForeignKey(Invoice, on_delete=models.PROTECT, related_name="receipts")
     reference = models.CharField(max_length=100, unique=True)
     amount = models.DecimalField(max_digits=18, decimal_places=2)
@@ -124,20 +187,8 @@ class InvoiceReceipt(TimeStampedModel):
         raise ValidationError("Receipts cannot be deleted.")
 
 
-class JournalQuerySet(models.QuerySet):
-    """Bulk writes bypass instance validation; require validated instance writes."""
-
-    def update(self, **kwargs):
-        raise ValidationError("Bulk journal updates are prohibited.")
-
-    def delete(self):
-        raise ValidationError("Bulk journal deletion is prohibited.")
-
-    def bulk_update(self, objs, fields, **kwargs):
-        raise ValidationError("Bulk journal updates are prohibited.")
-
-    def bulk_create(self, objs, **kwargs):
-        raise ValidationError("Bulk journal creation is prohibited.")
+class JournalQuerySet(GuardedQuerySet):
+    label = "journal"
 
 
 class ChartOfAccount(TimeStampedModel):

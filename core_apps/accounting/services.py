@@ -105,8 +105,7 @@ def cancel_invoice(invoice, *, cancellation_date, actor=None):
             invoice=invoice, entry_date=cancellation_date, memo=f"Cancel {invoice.number}",
             actor=actor, reversal_of=invoice.journal_entry)
     # Deliberate lifecycle transition after validation under the parent row lock.
-    Invoice.objects.filter(pk=invoice.pk).update(status="cancelled", cancellation_entry=entry)
-    invoice.refresh_from_db()
+    invoice._apply_transition(status="cancelled", cancellation_entry=entry)
     return invoice
 
 

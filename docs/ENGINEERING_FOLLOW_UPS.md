@@ -20,7 +20,7 @@ regression test or documented verification; record the evidence here.
 | AR-01 | High / in progress | Invoice posting, unpaid cancellation, single-invoice manual receipts, historical aging and protected read APIs now exist. Write APIs and reusable payments with multiple allocations remain. Goal 3 is not complete. |
 | AR-06 | Medium / open | Invoice list balances currently aggregate receipts per invoice. Remove this N+1 query pattern and add query-count regression tests before large datasets. |
 | AR-02 | Medium / partly addressed | Draft creation now re-reads and locks the customer. PostgreSQL concurrent deactivation tests remain; SQLite tests only verify persisted inactive customers are rejected. |
-| AR-03 | High / open | Invoice/receipt model guards can be bypassed by bulk ORM updates or raw SQL; draft line edits do not acquire the parent posting lock. Add database enforcement and concurrency tests before public financial write APIs. |
+| AR-03 | High / closed | Closed by migration 0005: lifecycle check constraints, SQLite/PostgreSQL triggers for invoices, lines and receipts, rejected bulk AR writes, and parent-locked draft line writes. Evidence under Completed safeguards. Journal-line equivalents remain INT-01/INT-02. |
 | AR-04 | Medium / open | Manual receipt reference is unique and sequential replay is idempotent. Concurrent cross-invoice reuse can raise IntegrityError; define retry/conflict handling and test with PostgreSQL. |
 | AR-05 | Medium / open | Tax, refunds, credit notes, period closing, and payment-to-many-invoice allocations remain. Paid invoices currently cannot be cancelled. |
 
@@ -29,6 +29,15 @@ regression test or documented verification; record the evidence here.
 - `e35b587`: rejects public bulk journal writes, stale posted-entry deletion,
   and line movement out of posted entries. Twelve regression tests added;
   full suite at that commit: 49 passed. This does not close INT-01 or INT-02.
+
+- AR-03 (migration `0005_ar_document_integrity`): raw SQL and private ORM
+  writes cannot change posted or cancelled invoices, their lines or receipts;
+  receipts need a posted invoice, open balance and matching AR credit. 30
+  regression tests in `test_ar_integrity.py`; with the SQLite triggers removed,
+  12 fail. One-off PostgreSQL 16 run (throwaway container, not CI): all 113
+  accounting tests passed; the SQLite-settings assertion fails by design. A
+  two-connection check showed a raw line insert waiting 2.0s for the posting
+  lock, then rejected after posting.
 
 ## Scope checkpoints
 
@@ -39,8 +48,9 @@ regression test or documented verification; record the evidence here.
 
 ## Latest verification
 
-AR read-API stage: `make test` ran 84 SQLite tests, all passed, including 6 AR
-read-API permission, filtering and aging tests; `make check` reported no issues.
+AR integrity stage: `make test` ran 114 SQLite tests, all passed; `make check`
+reported no issues. PostgreSQL verification was a manual one-off; PG-01 (a
+PostgreSQL test job) remains open.
 No PostgreSQL concurrency validation has been performed. Draft currency support
 is provisionally limited to USD, EUR and GBP, all with two decimal places;
 this is not a decision about the eventual business's base currency or taxes.

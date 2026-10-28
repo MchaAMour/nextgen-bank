@@ -18,6 +18,27 @@ receipt. Reuse with different details is rejected. Overpayments are rejected.
 Cancellation of any invoice with receipts is rejected until a refund workflow
 exists. Original posted journal entries remain in the ledger after reversal.
 
+## Database enforcement
+
+Migration `0005_ar_document_integrity` backs the model guards with the database
+(SQLite and PostgreSQL), so raw SQL and private ORM writes are also rejected:
+
+- Check constraints: due date not before issue date, supported currency, and
+  lifecycle fields consistent with status (a posted invoice has its journal
+  entry and a positive total; only a cancelled posted invoice has a cancellation
+  entry).
+- Invoices are inserted as drafts. Posting requires a posted journal entry
+  sourced from that invoice. A posted invoice may only become cancelled with a
+  posted entry that reverses its own. Non-draft invoices cannot be deleted.
+- Lines of non-draft invoices cannot be inserted, updated, moved or deleted.
+- Receipts are insert-only and require a posted invoice, an open balance and a
+  posted entry crediting AR (1100) by the receipt amount.
+- Bulk ORM writes on invoices, lines and receipts raise `ValidationError`.
+
+Draft line writes lock the parent invoice row like `post_invoice`; on
+PostgreSQL the line trigger also takes a share lock, so a line write and a
+posting cannot interleave. Violations raise `IntegrityError`.
+
 ## Read APIs
 
 All routes start with `/api/v1/accounting/`. GET only:
@@ -40,7 +61,7 @@ posted with zero open balance.
 
 ## Remaining work
 
-Goal 3 remains in progress: write APIs, credit notes/refunds, reusable payments
-with multiple allocations, and hardened lifecycle/concurrency enforcement.
+Goal 3 remains in progress: write APIs, credit notes/refunds and reusable
+payments with multiple allocations.
 See [Engineering follow-ups](ENGINEERING_FOLLOW_UPS.md). SQLite tests do not
 establish PostgreSQL concurrency correctness. No Stripe integration exists yet.
