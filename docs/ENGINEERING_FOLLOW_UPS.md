@@ -17,7 +17,8 @@ regression test or documented verification; record the evidence here.
 | AUTH-01 | Medium / open | Finance permissions currently require manual Group configuration. Add an idempotent role setup command with least-privilege tests. |
 | MONEY-01 | Medium / open | USD is a provisional example default; two decimal places are assumed. Confirm base currency and supported currency precision before payment integration. Tax/VAT requirements are undecided. |
 | OBS-01 | Low / open | Existing Django timezone and ReportLab deprecation warnings remain. Identify and address their sources during dependency maintenance. |
-| AR-01 | High / in progress | Invoice posting, unpaid cancellation, single-invoice manual receipts and historical aging services now exist. Protected APIs and reusable payments with multiple allocations remain. Goal 3 is not complete. |
+| AR-01 | High / in progress | Invoice posting, unpaid cancellation, single-invoice manual receipts, historical aging and protected read APIs now exist. Write APIs and reusable payments with multiple allocations remain. Goal 3 is not complete. |
+| AR-06 | Medium / open | Invoice list balances currently aggregate receipts per invoice. Remove this N+1 query pattern and add query-count regression tests before large datasets. |
 | AR-02 | Medium / partly addressed | Draft creation now re-reads and locks the customer. PostgreSQL concurrent deactivation tests remain; SQLite tests only verify persisted inactive customers are rejected. |
 | AR-03 | High / open | Invoice/receipt model guards can be bypassed by bulk ORM updates or raw SQL; draft line edits do not acquire the parent posting lock. Add database enforcement and concurrency tests before public financial write APIs. |
 | AR-04 | Medium / open | Manual receipt reference is unique and sequential replay is idempotent. Concurrent cross-invoice reuse can raise IntegrityError; define retry/conflict handling and test with PostgreSQL. |
@@ -38,8 +39,8 @@ regression test or documented verification; record the evidence here.
 
 ## Latest verification
 
-AR service stage: 78 SQLite tests passed, including 17 posting, payment,
-cancellation and historical-aging tests.
+AR read-API stage: `make test` ran 84 SQLite tests, all passed, including 6 AR
+read-API permission, filtering and aging tests; `make check` reported no issues.
 No PostgreSQL concurrency validation has been performed. Draft currency support
 is provisionally limited to USD, EUR and GBP, all with two decimal places;
 this is not a decision about the eventual business's base currency or taxes.
