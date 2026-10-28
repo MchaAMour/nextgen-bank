@@ -90,6 +90,11 @@ Each goal is completed in its own focused commit.
 
 ## Test and commit policy
 
+Track unresolved defects and improvement work in
+[Engineering follow-ups](ENGINEERING_FOLLOW_UPS.md). Implementation progress
+does not imply those items are resolved. Large goals may use several focused
+commits, each with its own verification evidence.
+
 Every commit must be backed by tests appropriate to its scope. Before creating
 the commit, run the relevant test module(s), a full affected-app test run, and
 static validation such as `python manage.py check`. The commit message records
