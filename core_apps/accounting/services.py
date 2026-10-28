@@ -101,16 +101,23 @@ def post_journal_entry(entry: JournalEntry, *, posted_by: User | None = None) ->
         return locked_entry
 
 
-def _post_pair(*, debit_code, credit_code, amount, currency, source_type, source_id, entry_date, memo,
-               actor=None, reversal_of=None):
-    accounts = {a.code: a for a in ChartOfAccount.objects.filter(code__in=[debit_code, credit_code])}
-    if len(accounts) != 2 or not all(a.is_active for a in accounts.values()):
+def post_lines(lines, *, currency, source_type, source_id, entry_date, memo, actor=None, reversal_of=None):
+    """Create and post one entry from (account code, debit, credit) lines; zero-amount lines are skipped."""
+    lines = [(code, debit, credit) for code, debit, credit in lines if debit or credit]
+    codes = {code for code, _, _ in lines}
+    accounts = {a.code: a for a in ChartOfAccount.objects.filter(code__in=codes)}
+    if len(accounts) != len(codes) or not all(a.is_active for a in accounts.values()):
         raise ValidationError("Required posting accounts are missing or inactive.")
     entry = JournalEntry.objects.create(entry_date=entry_date, memo=memo,
         source_type=source_type, source_id=source_id, reversal_of=reversal_of)
-    JournalLine.objects.create(entry=entry, account=accounts[debit_code], debit=amount, currency=currency)
-    JournalLine.objects.create(entry=entry, account=accounts[credit_code], credit=amount, currency=currency)
+    for code, debit, credit in lines:
+        JournalLine.objects.create(entry=entry, account=accounts[code], debit=debit, credit=credit,
+                                   currency=currency)
     return post_journal_entry(entry, posted_by=actor)
+
+
+def _post_pair(*, debit_code, credit_code, amount, **kwargs):
+    return post_lines([(debit_code, amount, Decimal("0")), (credit_code, Decimal("0"), amount)], **kwargs)
 
 
 def _post_for_invoice(invoice, **kwargs):
@@ -247,9 +254,11 @@ def receive_invoice_payment(invoice, *, amount, reference, received_on, actor=No
 
 
 @transaction.atomic
-def refund_payment(payment, *, amount, reference, refunded_on, actor=None):
-    """Return unapplied customer credit: debit AR, credit cash."""
+def refund_payment(payment, *, amount, reference, refunded_on, actor=None, cash_account="1000"):
+    """Return unapplied customer credit: debit AR, credit cash_account (Stripe clearing for Stripe refunds)."""
     amount = _money(amount, "Refund")
+    if cash_account not in CASH_ACCOUNTS:
+        raise ValidationError("Refunds must credit cash and bank or Stripe clearing.")
     payment = CustomerPayment.objects.select_for_update().get(pk=payment.pk)
     existing = _replay(PaymentRefund, {"reference": reference}, {"payment_id": payment.pk,
         "amount": amount, "refunded_on": refunded_on}, "Refund reference")
@@ -260,7 +269,7 @@ def refund_payment(payment, *, amount, reference, refunded_on, actor=None):
     if amount > payment.unapplied_amount:
         raise ValidationError("Refund exceeds the unapplied payment amount.")
     refund = PaymentRefund(payment=payment, reference=reference, amount=amount, refunded_on=refunded_on)
-    refund.journal_entry = _post_pair(debit_code="1100", credit_code="1000", amount=amount,
+    refund.journal_entry = _post_pair(debit_code="1100", credit_code=cash_account, amount=amount,
         currency=payment.currency, source_type="payment_refund", source_id=refund.pk,
         entry_date=refunded_on, memo=f"Refund {reference}", actor=actor)
     refund.save()

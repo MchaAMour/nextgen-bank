@@ -16,7 +16,7 @@ for amounts.
 | `record_customer_payment` | Debit cash (1000), credit AR (1100) for the full amount; optional allocations |
 | `allocate_payment` | No ledger entry; applies unapplied payment credit to an invoice |
 | `receive_invoice_payment` | Shortcut: one payment fully allocated to one invoice |
-| `refund_payment` | Debit AR (1100), credit cash (1000); unapplied credit only |
+| `refund_payment` | Debit AR (1100), credit cash (1000), or Stripe clearing (1010) for Stripe refunds; unapplied credit only |
 | `issue_credit_note` | Debit sales (4000), credit AR (1100); up to the invoice's open balance |
 | `invoice_aging` | Read-only balances at the supplied accounting date |
 

@@ -70,7 +70,49 @@ Restart the `api` service after writing the secret. The CLI secret only
 verifies events forwarded by `stripe listen`. A public deployment needs its own
 Dashboard webhook endpoint and signing secret (STRIPE-03).
 
-## Not yet handled
+## Reconciliation
 
-Stripe fees, payouts, refunds and disputes, and reconciliation of the clearing
-account, are Goal 6. See [Engineering follow-ups](ENGINEERING_FOLLOW_UPS.md).
+Payments enter Stripe clearing (1010) at their gross amount. The balance
+transaction sync then records every movement of the Stripe balance once, by its
+Stripe ID, so that 1010 follows the Stripe balance:
+
+| Reporting category | Entry |
+| --- | --- |
+| `charge` | Matched to payment `stripe:<payment_intent>`; fee: Dr 5100 Payment Processing Fees / Cr 1010 |
+| `refund` | Refund of the payment's unapplied credit: Dr 1100 / Cr 1010 |
+| `payout` | Dr 1000 Cash and Bank / Cr 1010; payout fees Dr 5100 |
+| `payout_reversal` | Dr 1010 / Cr 1000 |
+| `fee` | Stripe fees billed separately: Dr 5100 / Cr 1010 |
+
+Nothing is posted, and the transaction is stored as `needs_review` with a
+reason, when the charge's payment is not recorded yet (its webhook is pending),
+the amounts or the clearing account do not match, a refund exceeds the
+payment's unapplied credit, the currency is not EUR, or the category is not
+listed (disputes, for example). Every sync retries these. A refund of a payment
+that is already allocated to an invoice stays in review until allocations can
+be released (AR-05).
+
+Each sync lists transactions created from one day before the newest stored one
+(the first sync lists all), with their sources expanded.
+
+| Route | Method | Permissions |
+| --- | --- | --- |
+| `stripe/balance-transactions/` | GET (filters `state`, `reporting_category`) | `view_stripebalancetransaction` |
+| `stripe/balance-transactions/sync/` | POST | `add_stripebalancetransaction`, `add_journalentry` |
+| `stripe/reconciliation/` | GET | `view_stripebalancetransaction`, `view_journalline` |
+
+The reconciliation report compares the 1010 ledger balance with the Stripe EUR
+balance (available plus pending). `difference` = Stripe − ledger; the net of
+items in review explains part of it and the rest is `unexplained`.
+`unsynced_payments` counts Stripe payments whose charge is not synced yet; sync
+before reading the report. `reconciled` is true only with no difference, no
+review items and no unsynced payments.
+
+From the command line, `python manage.py sync_stripe_balance` syncs and prints
+the report. The Celery task `sync_stripe_balance_transactions` can be scheduled
+under Periodic tasks in the Django admin (django_celery_beat); no schedule is
+set up by default.
+
+The Stripe account must be used only by this application, since every balance
+transaction is reconciled against this ledger. See
+[Engineering follow-ups](ENGINEERING_FOLLOW_UPS.md) (STRIPE-02).

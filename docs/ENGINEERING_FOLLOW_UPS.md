@@ -17,8 +17,8 @@ regression test or documented verification; record the evidence here.
 | AUTH-01 | Medium / open | Finance permissions currently require manual Group configuration. Add an idempotent role setup command with least-privilege tests. |
 | MONEY-01 | Medium / decided | Decided 2026-10-28: EUR, the Stripe account's settlement currency, is the only ledger currency (migration 0008 constrains invoices, payments and journal lines; system check `accounting.E001` rejects another `ACCOUNTING_BASE_CURRENCY`). Other currencies need exchange rates and FX gain/loss accounting. Tax/VAT requirements remain undecided. |
 | OBS-01 | Low / open | Existing Django timezone and ReportLab deprecation warnings remain. Identify and address their sources during dependency maintenance. |
-| STRIPE-01 | Medium / open | `STRIPE_SECRET_KEY` is a full test-mode secret key. Before any shared or deployed environment, replace it with a restricted key (`rk_`) limited to Checkout Sessions (write) and keep it in a secrets vault. |
-| STRIPE-02 | High / open | Stripe payments debit clearing (1010), which is not yet reconciled: Stripe fees, payouts, refunds and disputes are not recorded. Required before live mode (Goal 6). |
+| STRIPE-01 | Medium / open | `STRIPE_SECRET_KEY` is a full test-mode secret key. Before any shared or deployed environment, replace it with a restricted key (`rk_`) limited to Checkout Sessions (write) and Balance and Balance Transactions (read), and keep it in a secrets vault. |
+| STRIPE-02 | High / partly addressed | Balance transaction sync (migration 0009) posts charge fees, payouts, payout reversals, Stripe fees and refunds of unapplied credit, and reports clearing (1010) against the Stripe balance. Disputes and other categories, and refunds of allocated payments (AR-05), are left for review with nothing posted. Remaining: a live sync against the dedicated sandbox, a schedule for the sync task, and dispute handling before live mode. |
 | STRIPE-03 | Medium / open | Webhooks are only set up locally through `stripe listen`. A public deployment needs a Dashboard endpoint with its own signing secret, and an allowlist of Stripe webhook IP addresses. |
 | STRIPE-04 | Medium / closed | End-to-end test-mode payment verified on 2026-10-28 (evidence under Completed safeguards). |
 | AR-01 | High / closed | Goal 3 scope delivered: drafts, posting, cancellation, reusable payments with multiple partial allocations, refunds, credit notes, historical aging reconciled to the AR ledger, database enforcement and protected APIs. Remaining AR items are tracked in AR-02, AR-04 and AR-05. |
@@ -79,6 +79,17 @@ regression test or documented verification; record the evidence here.
   still pass afterwards. 197 SQLite tests passed; one-off PostgreSQL run: 196
   accounting tests passed.
 
+- Stripe reconciliation (migration `0009_stripe_balance_transactions`): 17
+  tests in `test_stripe_reconciliation.py` with a mocked Stripe client cover
+  fee posting and resync without duplicates, a charge synced before its
+  webhook payment, amount and clearing-account mismatches, payouts with fees,
+  payout reversals, separately billed Stripe fees, refunds from clearing and
+  refunds beyond unapplied credit, unhandled categories and currencies, and the
+  report (reconciled, explained by review items, unsynced payments) through the
+  API with permissions, 502 and 503. 0009 reversed and reapplied on SQLite
+  (single process) and PostgreSQL 16. Not yet run against a live Stripe
+  account.
+
 ## Scope checkpoints
 
 - Ledger reporting is read-only; do not describe the ledger as production-ready.
@@ -88,9 +99,11 @@ regression test or documented verification; record the evidence here.
 
 ## Latest verification
 
-Stripe Checkout stage (Goal 4): `make test` ran 195 SQLite tests, all passed;
-`make check` reported no issues. A one-off PostgreSQL 16 run passed all 194
-accounting tests (the SQLite-settings assertion fails by design). One live
-test-mode Checkout payment succeeded end to end (STRIPE-04). PG-01 (a PostgreSQL test job)
+Stripe reconciliation stage (Goal 6, step 2): `make test` ran 214 SQLite
+tests, all passed; `make check` reported no issues; `makemigrations --check`
+found no changes. A one-off PostgreSQL 16 run passed all 213 accounting tests.
+One live test-mode Checkout payment succeeded end to end (STRIPE-04); the
+balance sync has not run against Stripe yet (waiting for the dedicated
+sandbox). PG-01 (a PostgreSQL test job)
 remains open. Finance roles still need manual Group setup (AUTH-01).
 EUR is the only ledger currency (MONEY-01). Tax is not supported.

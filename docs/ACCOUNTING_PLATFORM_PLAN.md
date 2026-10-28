@@ -188,7 +188,10 @@ tests.
 ### Goal 6 — reconciliation and financial reports
 
 - Import bank/Stripe settlement data.
-- Reconcile clearing account, Stripe fees, refunds, and payouts.
+- Reconcile clearing account, Stripe fees, refunds, and payouts. *Stripe part
+  done: balance transaction sync and clearing report
+  ([Stripe payments](STRIPE_PAYMENTS.md#reconciliation)); bank statements
+  remain.*
 - Add balance sheet, profit and loss, customer/supplier statements, and audit
   history.
 

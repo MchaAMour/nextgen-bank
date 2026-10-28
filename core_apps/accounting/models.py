@@ -338,6 +338,52 @@ class StripeWebhookEvent(TimeStampedModel):
     processed_at = models.DateTimeField(null=True, blank=True)
 
 
+class StripeBalanceTransaction(TimeStampedModel):
+    """A movement of the Stripe balance, stored once and reconciled against Stripe clearing (1010).
+
+    Amounts are signed as Stripe reports them: net = amount - fee is the balance change.
+    Items that need review post nothing and are retried on every sync.
+    """
+
+    class State(models.TextChoices):
+        POSTED = "posted", _("Posted")
+        NOTHING_TO_POST = "nothing_to_post", _("Matched, nothing to post")
+        NEEDS_REVIEW = "needs_review", _("Needs review")
+
+    FINISHED = [State.POSTED, State.NOTHING_TO_POST]
+
+    stripe_id = models.CharField(max_length=255, unique=True)
+    reporting_category = models.CharField(max_length=50)
+    amount = models.DecimalField(max_digits=18, decimal_places=2)
+    fee = models.DecimalField(max_digits=18, decimal_places=2)
+    net = models.DecimalField(max_digits=18, decimal_places=2)
+    currency = models.CharField(max_length=3)
+    stripe_status = models.CharField(max_length=20)
+    stripe_created = models.DateTimeField()
+    source_id = models.CharField(max_length=255, blank=True)
+    state = models.CharField(max_length=20, choices=State.choices, default=State.NEEDS_REVIEW)
+    review_reason = models.CharField(max_length=500, blank=True)
+    payment = models.ForeignKey(CustomerPayment, null=True, blank=True, on_delete=models.PROTECT,
+                                related_name="stripe_balance_transactions")
+    refund = models.OneToOneField(PaymentRefund, null=True, blank=True, on_delete=models.PROTECT,
+                                  related_name="stripe_balance_transaction")
+    journal_entry = models.OneToOneField("JournalEntry", null=True, blank=True, on_delete=models.PROTECT,
+                                         related_name="stripe_balance_transaction")
+    payload = models.JSONField()
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(check=models.Q(net=models.F("amount") - models.F("fee")),
+                                   name="stripe_balance_net_is_amount_less_fee"),
+            models.CheckConstraint(check=~models.Q(state="posted")
+                                   | models.Q(journal_entry__isnull=False) | models.Q(refund__isnull=False),
+                                   name="stripe_balance_posted_has_entry"),
+            models.CheckConstraint(check=models.Q(state="posted")
+                                   | models.Q(journal_entry__isnull=True, refund__isnull=True),
+                                   name="stripe_balance_only_posted_has_entry"),
+        ]
+
+
 class JournalQuerySet(GuardedQuerySet):
     label = "journal"
 
