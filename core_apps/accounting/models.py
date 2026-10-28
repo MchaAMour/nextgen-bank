@@ -13,6 +13,22 @@ from core_apps.common.models import TimeStampedModel
 User = get_user_model()
 
 
+class JournalQuerySet(models.QuerySet):
+    """Bulk writes bypass instance validation; require validated instance writes."""
+
+    def update(self, **kwargs):
+        raise ValidationError("Bulk journal updates are prohibited.")
+
+    def delete(self):
+        raise ValidationError("Bulk journal deletion is prohibited.")
+
+    def bulk_update(self, objs, fields, **kwargs):
+        raise ValidationError("Bulk journal updates are prohibited.")
+
+    def bulk_create(self, objs, **kwargs):
+        raise ValidationError("Bulk journal creation is prohibited.")
+
+
 class ChartOfAccount(TimeStampedModel):
     class AccountType(models.TextChoices):
         ASSET = "asset", _("Asset")
@@ -68,6 +84,8 @@ class ChartOfAccount(TimeStampedModel):
 
 
 class JournalEntry(TimeStampedModel):
+    objects = JournalQuerySet.as_manager()
+
     class Status(models.TextChoices):
         DRAFT = "draft", _("Draft")
         POSTED = "posted", _("Posted")
@@ -107,12 +125,12 @@ class JournalEntry(TimeStampedModel):
                 .values_list("status", flat=True)
                 .first()
             )
-            if original_status == self.Status.POSTED:
+            if original_status in (self.Status.POSTED, self.Status.REVERSED):
                 raise ValidationError("Posted journal entries are immutable.")
         super().save(*args, **kwargs)
 
     def delete(self, *args, **kwargs) -> None:
-        if self.status == self.Status.POSTED:
+        if JournalEntry.objects.filter(pk=self.pk).exclude(status=self.Status.DRAFT).exists():
             raise ValidationError("Posted journal entries cannot be deleted.")
         super().delete(*args, **kwargs)
 
@@ -121,6 +139,8 @@ class JournalEntry(TimeStampedModel):
 
 
 class JournalLine(TimeStampedModel):
+    objects = JournalQuerySet.as_manager()
+
     entry = models.ForeignKey(
         JournalEntry, on_delete=models.PROTECT, related_name="lines"
     )
@@ -163,17 +183,23 @@ class JournalLine(TimeStampedModel):
             raise ValidationError({"currency": _("Use a three-letter currency code.")})
 
     def save(self, *args, **kwargs) -> None:
-        if self.entry_id and JournalEntry.objects.filter(
-            pk=self.entry_id, status=JournalEntry.Status.POSTED
-        ).exists():
+        original_entry_id = JournalLine.objects.filter(pk=self.pk).values_list(
+            "entry_id", flat=True
+        ).first()
+        if JournalEntry.objects.filter(
+            pk__in=[self.entry_id, original_entry_id]
+        ).exclude(status=JournalEntry.Status.DRAFT).exists():
             raise ValidationError("Lines belonging to posted entries are immutable.")
         self.currency = self.currency.upper()
         self.full_clean()
         super().save(*args, **kwargs)
 
     def delete(self, *args, **kwargs) -> None:
+        original_entry_id = JournalLine.objects.filter(pk=self.pk).values_list(
+            "entry_id", flat=True
+        ).first()
         if JournalEntry.objects.filter(
-            pk=self.entry_id, status=JournalEntry.Status.POSTED
-        ).exists():
+            pk=original_entry_id
+        ).exclude(status=JournalEntry.Status.DRAFT).exists():
             raise ValidationError("Lines belonging to posted entries cannot be deleted.")
         super().delete(*args, **kwargs)

@@ -56,5 +56,8 @@ GET /api/v1/accounting/trial-balance/?end_date=2026-01-31&currency=USD
 Run `make test` and `make check`. The isolated container uses SQLite and does
 not require Stripe keys or the development database. Before production use,
 PostgreSQL-specific concurrency and decimal aggregation require integration
-tests. Current model save/delete guards do not prevent every bulk ORM or raw
-SQL mutation; further ledger integrity hardening is needed before write APIs.
+tests. Public journal QuerySet bulk writes are prohibited, including for drafts;
+use validated instance operations. Save/delete guards consult persisted state,
+including a line's original parent, to reject stale-object mutation of posted
+history. Raw SQL and private ORM methods remain outside these guards. Database
+enforcement and concurrent edit/post tests are still needed before write APIs.
