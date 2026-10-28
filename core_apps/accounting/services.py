@@ -5,7 +5,25 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone
 
-from .models import JournalEntry
+from .models import Invoice, InvoiceLine, JournalEntry
+
+
+@transaction.atomic
+def create_draft_invoice(*, customer, number, issue_date, due_date, lines, currency="USD"):
+    """Create a complete draft atomically, without recording revenue or AR yet."""
+    if not customer.is_active:
+        raise ValidationError("Cannot invoice an inactive customer.")
+    lines = list(lines)
+    if not lines:
+        raise ValidationError("An invoice requires at least one line.")
+    invoice = Invoice.objects.create(customer=customer, number=number,
+                                     issue_date=issue_date, due_date=due_date, currency=currency)
+    for line in lines:
+        for field in ("quantity", "unit_price"):
+            if isinstance(line.get(field), (float, bool)):
+                raise ValidationError("Use Decimal or decimal strings for invoice amounts.")
+        InvoiceLine.objects.create(invoice=invoice, **line)
+    return invoice
 
 User = get_user_model()
 

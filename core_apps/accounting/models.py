@@ -1,4 +1,4 @@
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
@@ -11,6 +11,65 @@ from django.utils.translation import gettext_lazy as _
 from core_apps.common.models import TimeStampedModel
 
 User = get_user_model()
+
+
+class Customer(TimeStampedModel):
+    name = models.CharField(max_length=200)
+    email = models.EmailField(blank=True)
+    is_active = models.BooleanField(default=True)
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+
+class Invoice(TimeStampedModel):
+    """Draft document only; ledger posting is a subsequent implementation stage."""
+
+    number = models.CharField(max_length=40, unique=True)
+    customer = models.ForeignKey(Customer, on_delete=models.PROTECT, related_name="invoices")
+    issue_date = models.DateField(default=timezone.localdate)
+    due_date = models.DateField()
+    currency = models.CharField(max_length=3, default="USD")
+
+    def clean(self):
+        super().clean()
+        if self.issue_date and self.due_date and self.due_date < self.issue_date:
+            raise ValidationError({"due_date": "Due date must not precede issue date."})
+        if self.currency not in ("USD", "EUR", "GBP"):
+            raise ValidationError({"currency": "Draft invoices currently support USD, EUR and GBP."})
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+    @property
+    def total(self):
+        # Round each line first, then sum; this matches displayed document lines.
+        return sum((line.total for line in self.lines.all()), Decimal("0.00"))
+
+
+class InvoiceLine(TimeStampedModel):
+    invoice = models.ForeignKey(Invoice, on_delete=models.CASCADE, related_name="lines")
+    description = models.CharField(max_length=500)
+    quantity = models.DecimalField(max_digits=10, decimal_places=3,
+                                   validators=[MinValueValidator(Decimal("0.001"))])
+    unit_price = models.DecimalField(max_digits=12, decimal_places=2,
+                                     validators=[MinValueValidator(Decimal("0.00"))])
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(check=models.Q(quantity__gt=0), name="invoice_quantity_positive"),
+            models.CheckConstraint(check=models.Q(unit_price__gte=0), name="invoice_price_nonnegative"),
+        ]
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+    @property
+    def total(self):
+        return (self.quantity * self.unit_price).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
 class JournalQuerySet(models.QuerySet):

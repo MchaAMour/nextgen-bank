@@ -17,6 +17,8 @@ regression test or documented verification; record the evidence here.
 | AUTH-01 | Medium / open | Finance permissions currently require manual Group configuration. Add an idempotent role setup command with least-privilege tests. |
 | MONEY-01 | Medium / open | USD is a provisional example default; two decimal places are assumed. Confirm base currency and supported currency precision before payment integration. Tax/VAT requirements are undecided. |
 | OBS-01 | Low / open | Existing Django timezone and ReportLab deprecation warnings remain. Identify and address their sources during dependency maintenance. |
+| AR-01 | High / open | Draft models/service exist, but posting, cancellation, allocations, aging and protected invoice APIs are not implemented. Add these with lifecycle, permissions, rollback and replay tests before marking Goal 3 complete. |
+| AR-02 | Medium / open | Draft service checks the supplied customer instance; concurrent deactivation and direct ORM bypasses are not covered. Re-read and lock the customer in production write workflows. |
 
 ## Completed safeguards
 
@@ -30,3 +32,10 @@ regression test or documented verification; record the evidence here.
 - AR is being built in smaller commits: draft documents first, then posting,
   cancellation, payment allocation and aging. Goal 3 is incomplete until all
   those workflows and their tests pass.
+
+## Latest verification
+
+Draft invoice stage: 61 SQLite tests passed, including 12 draft-invoice tests.
+No PostgreSQL concurrency validation has been performed. Draft currency support
+is provisionally limited to USD, EUR and GBP, all with two decimal places;
+this is not a decision about the eventual business's base currency or taxes.
