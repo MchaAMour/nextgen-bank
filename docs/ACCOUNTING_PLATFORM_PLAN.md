@@ -169,7 +169,7 @@ tests.
 Implemented: Checkout Sessions for an invoice's open balance, signed webhooks
 stored once, delayed-payment handling, and payments posted to Stripe clearing
 and allocated to the invoice. See [Stripe payments](STRIPE_PAYMENTS.md). A
-live test-mode run is pending (STRIPE-04).
+live test-mode payment was verified end to end through `stripe listen`.
 
 **Commit:** `feat: accept Stripe invoice payments`
 
