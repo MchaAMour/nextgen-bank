@@ -17,8 +17,11 @@ regression test or documented verification; record the evidence here.
 | AUTH-01 | Medium / open | Finance permissions currently require manual Group configuration. Add an idempotent role setup command with least-privilege tests. |
 | MONEY-01 | Medium / open | USD is a provisional example default; two decimal places are assumed. Confirm base currency and supported currency precision before payment integration. Tax/VAT requirements are undecided. |
 | OBS-01 | Low / open | Existing Django timezone and ReportLab deprecation warnings remain. Identify and address their sources during dependency maintenance. |
-| AR-01 | High / open | Draft models/service exist, but posting, cancellation, allocations, aging and protected invoice APIs are not implemented. Add these with lifecycle, permissions, rollback and replay tests before marking Goal 3 complete. |
-| AR-02 | Medium / open | Draft service checks the supplied customer instance; concurrent deactivation and direct ORM bypasses are not covered. Re-read and lock the customer in production write workflows. |
+| AR-01 | High / in progress | Invoice posting, unpaid cancellation, single-invoice manual receipts and historical aging services now exist. Protected APIs and reusable payments with multiple allocations remain. Goal 3 is not complete. |
+| AR-02 | Medium / partly addressed | Draft creation now re-reads and locks the customer. PostgreSQL concurrent deactivation tests remain; SQLite tests only verify persisted inactive customers are rejected. |
+| AR-03 | High / open | Invoice/receipt model guards can be bypassed by bulk ORM updates or raw SQL; draft line edits do not acquire the parent posting lock. Add database enforcement and concurrency tests before public financial write APIs. |
+| AR-04 | Medium / open | Manual receipt reference is unique and sequential replay is idempotent. Concurrent cross-invoice reuse can raise IntegrityError; define retry/conflict handling and test with PostgreSQL. |
+| AR-05 | Medium / open | Tax, refunds, credit notes, period closing, and payment-to-many-invoice allocations remain. Paid invoices currently cannot be cancelled. |
 
 ## Completed safeguards
 
@@ -35,7 +38,8 @@ regression test or documented verification; record the evidence here.
 
 ## Latest verification
 
-Draft invoice stage: 61 SQLite tests passed, including 12 draft-invoice tests.
+AR service stage: 78 SQLite tests passed, including 17 posting, payment,
+cancellation and historical-aging tests.
 No PostgreSQL concurrency validation has been performed. Draft currency support
 is provisionally limited to USD, EUR and GBP, all with two decimal places;
 this is not a decision about the eventual business's base currency or taxes.

@@ -31,6 +31,13 @@ class Invoice(TimeStampedModel):
     issue_date = models.DateField(default=timezone.localdate)
     due_date = models.DateField()
     currency = models.CharField(max_length=3, default="USD")
+    status = models.CharField(max_length=10, default="draft", choices=[
+        ("draft", "Draft"), ("posted", "Posted"), ("cancelled", "Cancelled")])
+    posted_total = models.DecimalField(max_digits=18, decimal_places=2, null=True, blank=True)
+    journal_entry = models.OneToOneField("JournalEntry", null=True, blank=True,
+                                        on_delete=models.PROTECT, related_name="invoice")
+    cancellation_entry = models.OneToOneField("JournalEntry", null=True, blank=True,
+                                             on_delete=models.PROTECT, related_name="cancelled_invoice")
 
     def clean(self):
         super().clean()
@@ -40,6 +47,9 @@ class Invoice(TimeStampedModel):
             raise ValidationError({"currency": "Draft invoices currently support USD, EUR and GBP."})
 
     def save(self, *args, **kwargs):
+        original = Invoice.objects.filter(pk=self.pk).first()
+        if original and original.status != "draft":
+            raise ValidationError("Posted invoices must be changed through accounting services.")
         self.full_clean()
         return super().save(*args, **kwargs)
 
@@ -47,6 +57,18 @@ class Invoice(TimeStampedModel):
     def total(self):
         # Round each line first, then sum; this matches displayed document lines.
         return sum((line.total for line in self.lines.all()), Decimal("0.00"))
+
+    @property
+    def open_balance(self):
+        if self.status != "posted":
+            return Decimal("0.00")
+        received = self.receipts.aggregate(total=models.Sum("amount"))["total"] or Decimal("0")
+        return self.posted_total - received
+
+    def delete(self, *args, **kwargs):
+        if Invoice.objects.filter(pk=self.pk).exclude(status="draft").exists():
+            raise ValidationError("Posted invoices cannot be deleted.")
+        return super().delete(*args, **kwargs)
 
 
 class InvoiceLine(TimeStampedModel):
@@ -64,12 +86,42 @@ class InvoiceLine(TimeStampedModel):
         ]
 
     def save(self, *args, **kwargs):
+        original_parent = InvoiceLine.objects.filter(pk=self.pk).values_list("invoice_id", flat=True).first()
+        if Invoice.objects.filter(pk__in=[original_parent, self.invoice_id]).exclude(status="draft").exists():
+            raise ValidationError("Posted invoice lines are immutable.")
         self.full_clean()
         return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        parent = InvoiceLine.objects.filter(pk=self.pk).values_list("invoice_id", flat=True).first()
+        if Invoice.objects.filter(pk=parent).exclude(status="draft").exists():
+            raise ValidationError("Posted invoice lines are immutable.")
+        return super().delete(*args, **kwargs)
 
     @property
     def total(self):
         return (self.quantity * self.unit_price).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+class InvoiceReceipt(TimeStampedModel):
+    """One manual receipt allocated to one invoice; provider payments come later."""
+    invoice = models.ForeignKey(Invoice, on_delete=models.PROTECT, related_name="receipts")
+    reference = models.CharField(max_length=100, unique=True)
+    amount = models.DecimalField(max_digits=18, decimal_places=2)
+    received_on = models.DateField()
+    journal_entry = models.OneToOneField("JournalEntry", on_delete=models.PROTECT)
+
+    class Meta:
+        constraints = [models.CheckConstraint(check=models.Q(amount__gt=0), name="receipt_positive")]
+
+    def save(self, *args, **kwargs):
+        if InvoiceReceipt.objects.filter(pk=self.pk).exists():
+            raise ValidationError("Receipts are immutable.")
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Receipts cannot be deleted.")
 
 
 class JournalQuerySet(models.QuerySet):

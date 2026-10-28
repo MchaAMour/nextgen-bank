@@ -48,6 +48,7 @@ def test_invalid_document_rejected(draft_data, change):
         draft_data["currency"] = "JPY"
     else:
         draft_data["customer"].is_active = False
+        draft_data["customer"].save()
     with pytest.raises(ValidationError):
         create_draft_invoice(**draft_data)
     assert not Invoice.objects.exists()

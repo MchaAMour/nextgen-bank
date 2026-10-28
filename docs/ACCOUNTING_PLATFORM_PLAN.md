@@ -142,10 +142,11 @@ for routes, group setup, report semantics, and current limitations.
 
 ### Goal 3 — AR invoicing
 
-In progress: Customer, Invoice and InvoiceLine draft models plus atomic
-`create_draft_invoice` service implemented. Totals round each line to two decimal
-places before summing. Drafts do not create journal entries. Posting, cancellation,
-allocations, aging and invoice APIs remain to be implemented.
+In progress: draft documents, invoice posting, unpaid cancellation via reversing
+entries, partial manual receipts and historical aging services implemented.
+Manual receipts currently apply to one invoice. Protected APIs, reusable payments
+with allocation records, refunds and credit notes remain. Totals round each line
+to two decimal places before summing. Drafts do not create journal entries.
 
 - Add customers, invoice drafts, invoice lines, posting, and cancellation.
 - Calculate invoice open balances and AR aging.
