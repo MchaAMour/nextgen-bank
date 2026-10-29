@@ -26,5 +26,6 @@ def test_task_is_skipped_without_a_stripe_key(settings):
         assert "skipped" in sync_stripe_balance_transactions.delay().get()
     sync.assert_not_called()
     settings.STRIPE_SECRET_KEY = "sk_test_unit"
-    with patch("core_apps.accounting.tasks.sync_balance_transactions", return_value={"listed": 0}):
-        assert sync_stripe_balance_transactions.delay().get() == {"listed": 0}
+    with patch("core_apps.accounting.tasks.sync_balance_transactions", return_value={"listed": 0}), \
+            patch("core_apps.accounting.tasks.recover_checkout_sessions", return_value={}):
+        assert sync_stripe_balance_transactions.delay().get() == {"listed": 0, "recovered_sessions": {}}

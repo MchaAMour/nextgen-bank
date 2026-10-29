@@ -68,6 +68,17 @@ this application did not create, and other event types, are stored as
 `failed` and the endpoint returns 500 so that Stripe retries. Invalid
 signatures return 400 and store nothing; a missing signing secret returns 503.
 
+## Missed webhooks
+
+Stripe sends a destination only the event types it is subscribed to when the
+event happens; adding a type later does not redeliver past events. If a payment
+completes without its `checkout.session.*` event, the session stays open here.
+`recover_checkout_sessions` reads every open session from the Checkout Sessions
+API and records paid ones exactly as the webhook would, dated when the payment
+was made; expired ones are marked expired. It runs before each scheduled Stripe
+sync, and on demand with `python manage.py recover_stripe_checkouts`. The
+restricted key needs only the Checkout Sessions permission it already has.
+
 ## Configuration
 
 Settings come from environment variables (never the database):
