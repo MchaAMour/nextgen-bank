@@ -132,3 +132,21 @@ requesting user as `posted_by` on their journal entry.
 
 Tax, period closing, and releasing allocations to correct a paid invoice. See
 [Engineering follow-ups](ENGINEERING_FOLLOW_UPS.md). Stripe payments are Goal 4.
+
+## Roles
+
+`python manage.py setup_accounting_roles` creates the finance groups and resets
+them to exactly these permissions, so it is safe to run again after upgrades:
+
+| Group | Can |
+| --- | --- |
+| Accounting viewer | Read everything in accounting |
+| AR clerk | Customers, draft invoices, payments and allocations, Stripe checkout links |
+| AR manager | Post and cancel invoices, refunds, credit notes |
+| AP clerk | Suppliers, draft bills, supplier payments and allocations |
+| AP approver | Approve, post and cancel bills |
+| Reconciler | Import bank statements, match lines, post bank-only items, sync Stripe |
+| Controller | All of the above |
+
+Every group can read. No group can change or delete journal entries, lines or
+audit events. A bill's creator still cannot approve it, even with both AP roles.
