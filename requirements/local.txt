@@ -4,3 +4,6 @@ watchfiles==0.22.0
 black==24.8.0
 pytest==8.3.3
 pytest-django==4.9.0
+# Model diagrams for docs/ARCHITECTURE.md: make diagrams
+django-extensions==3.2.3
+pydot==3.0.4

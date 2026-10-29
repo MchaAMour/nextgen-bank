@@ -49,6 +49,25 @@ lock-requirements:
 	  | grep -v "^pip==\|^setuptools==\|^wheel==" | sort -f; } > requirements/constraints.txt.new \
 	  && mv requirements/constraints.txt.new requirements/constraints.txt
 
+# Model diagrams (django-extensions graph_models + Graphviz) for docs/ARCHITECTURE.md.
+DIAGRAMS = docker compose -f docker/test.yml run --rm -T --user "$$(id -u):$$(id -g)" \
+	-e DJANGO_SETTINGS_MODULE=config.settings.diagrams tests python manage.py graph_models
+DIAGRAM_OPTS = --arrow-shape normal --hide-edge-labels \
+	--exclude-models TimeStampedModel,AppendOnlyRecord,AbstractUser,AbstractBaseUser,PermissionsMixin,Group,Permission
+
+diagrams:
+	@docker compose -f docker/test.yml build tests >&2
+	@mkdir -p docs/diagrams
+	$(DIAGRAMS) user_profile accounts cards user_auth $(DIAGRAM_OPTS) -o docs/diagrams/banking.png
+	$(DIAGRAMS) accounting $(DIAGRAM_OPTS) -o docs/diagrams/ledger.png \
+		-I ChartOfAccount,JournalEntry,JournalLine,PeriodClose,AuditEvent
+	$(DIAGRAMS) accounting $(DIAGRAM_OPTS) -o docs/diagrams/receivables.png \
+		-I Customer,Invoice,InvoiceLine,CreditNote,CustomerPayment,PaymentAllocation,AllocationRelease,PaymentRefund,StripeCheckoutSession,JournalEntry
+	$(DIAGRAMS) accounting $(DIAGRAM_OPTS) -o docs/diagrams/payables.png \
+		-I Supplier,Bill,BillLine,SupplierPayment,SupplierPaymentAllocation,JournalEntry,ChartOfAccount
+	$(DIAGRAMS) accounting $(DIAGRAM_OPTS) -o docs/diagrams/bank_and_stripe.png \
+		-I BankStatement,BankStatementLine,BankMatch,JournalLine,StripeBalanceTransaction,StripeWebhookEvent,JournalEntry,PaymentRefund,ChartOfAccount
+
 check:
 	docker compose -f docker/test.yml run --rm --build tests python manage.py check
 
