@@ -91,8 +91,10 @@ stripe-listen:
 # Demo production stack on this server, behind the shared edge Caddy (docs/DEPLOYMENT.md).
 PROD = docker compose -f production.yml
 
+# nginx resolves api once at start; restart it so it follows a recreated api container.
 prod-up:
 	$(PROD) up -d --build --remove-orphans
+	$(PROD) restart nginx
 
 prod-down:
 	$(PROD) down
