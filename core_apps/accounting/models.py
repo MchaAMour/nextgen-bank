@@ -666,3 +666,196 @@ class AuditEvent(AppendOnlyRecord):
         ordering = ["-created_at", "id"]
         indexes = [models.Index(fields=["object_type", "object_id"], name="audit_event_object"),
                    models.Index(fields=["created_at"], name="audit_event_created")]
+
+
+class APQuerySet(GuardedQuerySet):
+    label = "AP document"
+
+
+class BillQuerySet(APQuerySet):
+    def with_balances(self):
+        return self.annotate(allocated_total=_amount_sum(SupplierPaymentAllocation, "bill"))
+
+
+class SupplierPaymentQuerySet(APQuerySet):
+    def with_balances(self):
+        return self.annotate(allocated_total=_amount_sum(SupplierPaymentAllocation, "payment"))
+
+
+class Supplier(TimeStampedModel):
+    name = models.CharField(max_length=200)
+    email = models.EmailField(blank=True)
+    is_active = models.BooleanField(default=True)
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+
+class Bill(TimeStampedModel):
+    """A supplier's invoice. Drafts are approved by someone other than their creator, then posted.
+
+    Lifecycle changes go through services; database triggers reject other writes.
+    """
+
+    class Status(models.TextChoices):
+        DRAFT = "draft", _("Draft")
+        APPROVED = "approved", _("Approved")
+        POSTED = "posted", _("Posted")
+        CANCELLED = "cancelled", _("Cancelled")
+
+    objects = BillQuerySet.as_manager()
+
+    supplier = models.ForeignKey(Supplier, on_delete=models.PROTECT, related_name="bills")
+    number = models.CharField(max_length=60)  # The supplier's invoice number.
+    bill_date = models.DateField()
+    due_date = models.DateField()
+    currency = models.CharField(max_length=3, default=BASE_CURRENCY)
+    status = models.CharField(max_length=10, choices=Status.choices, default=Status.DRAFT)
+    created_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.PROTECT, related_name="bills_created")
+    approved_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.PROTECT,
+                                    related_name="bills_approved")
+    approved_at = models.DateTimeField(null=True, blank=True)
+    posted_total = models.DecimalField(max_digits=18, decimal_places=2, null=True, blank=True)
+    journal_entry = models.OneToOneField("JournalEntry", null=True, blank=True, on_delete=models.PROTECT,
+                                         related_name="bill")
+    cancellation_entry = models.OneToOneField("JournalEntry", null=True, blank=True, on_delete=models.PROTECT,
+                                              related_name="cancelled_bill")
+
+    class Meta:
+        permissions = [("approve_bill", "Can approve bills"), ("post_bill", "Can post bills"),
+                       ("cancel_bill", "Can cancel bills")]
+        constraints = [
+            models.UniqueConstraint(fields=["supplier", "number"], name="bill_number_unique_per_supplier"),
+            models.CheckConstraint(check=models.Q(due_date__gte=models.F("bill_date")),
+                                   name="bill_due_not_before_bill_date"),
+            models.CheckConstraint(check=models.Q(currency__in=INVOICE_CURRENCIES), name="bill_currency_supported"),
+            models.CheckConstraint(name="bill_lifecycle_consistent", check=(
+                models.Q(status="draft", approved_by__isnull=True, approved_at__isnull=True,
+                         journal_entry__isnull=True, posted_total__isnull=True, cancellation_entry__isnull=True)
+                | models.Q(status="approved", approved_by__isnull=False, approved_at__isnull=False,
+                           journal_entry__isnull=True, posted_total__isnull=True, cancellation_entry__isnull=True)
+                | models.Q(status="posted", approved_by__isnull=False, approved_at__isnull=False,
+                           journal_entry__isnull=False, posted_total__gt=0, cancellation_entry__isnull=True)
+                | models.Q(status="cancelled", journal_entry__isnull=True, posted_total__isnull=True,
+                           cancellation_entry__isnull=True)
+                | models.Q(status="cancelled", approved_by__isnull=False, journal_entry__isnull=False,
+                           posted_total__gt=0, cancellation_entry__isnull=False))),
+            models.CheckConstraint(check=models.Q(approved_by__isnull=True) | models.Q(created_by__isnull=True)
+                                   | ~models.Q(approved_by=models.F("created_by")),
+                                   name="bill_approver_is_not_creator"),
+        ]
+
+    def clean(self):
+        super().clean()
+        if self.bill_date and self.due_date and self.due_date < self.bill_date:
+            raise ValidationError({"due_date": "Due date must not precede the bill date."})
+        if self.currency not in INVOICE_CURRENCIES:
+            raise ValidationError({"currency": f"Bills must use {BASE_CURRENCY}."})
+
+    @transaction.atomic
+    def save(self, *args, **kwargs):
+        original = Bill.objects.select_for_update().filter(pk=self.pk).first()
+        if original and original.status != "draft":
+            raise ValidationError("Approved or posted bills must be changed through accounting services.")
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+    def _apply_transition(self, **fields):
+        """Service-only lifecycle change; the caller holds the row lock and triggers validate it."""
+        for name, value in fields.items():
+            setattr(self, name, value)
+        super().save(update_fields=[*fields, "updated_at"])
+
+    @property
+    def total(self):
+        return sum((line.total for line in self.lines.all()), Decimal("0.00"))
+
+    @property
+    def open_balance(self):
+        """What is still owed; use Bill.objects.with_balances() to avoid per-row queries."""
+        if self.status != "posted":
+            return Decimal("0.00")
+        return self.posted_total - _stored_total(self, "allocated_total", "allocations")
+
+    def delete(self, *args, **kwargs):
+        if Bill.objects.filter(pk=self.pk).exclude(status="draft").exists():
+            raise ValidationError("Only draft bills can be deleted.")
+        return super().delete(*args, **kwargs)
+
+
+class BillLine(TimeStampedModel):
+    objects = APQuerySet.as_manager()
+
+    bill = models.ForeignKey(Bill, on_delete=models.CASCADE, related_name="lines")
+    account = models.ForeignKey(ChartOfAccount, on_delete=models.PROTECT, related_name="bill_lines")
+    description = models.CharField(max_length=500)
+    quantity = models.DecimalField(max_digits=10, decimal_places=3, validators=[MinValueValidator(Decimal("0.001"))])
+    unit_price = models.DecimalField(max_digits=12, decimal_places=2, validators=[MinValueValidator(Decimal("0.00"))])
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(check=models.Q(quantity__gt=0), name="bill_quantity_positive"),
+            models.CheckConstraint(check=models.Q(unit_price__gte=0), name="bill_price_nonnegative"),
+        ]
+
+    def _lock_draft_bills(self, *bill_ids):
+        statuses = Bill.objects.select_for_update().filter(pk__in=[pk for pk in bill_ids if pk]).values_list(
+            "status", flat=True)
+        if any(status != "draft" for status in statuses):
+            raise ValidationError("Lines of approved or posted bills are immutable.")
+
+    @transaction.atomic
+    def save(self, *args, **kwargs):
+        original = BillLine.objects.filter(pk=self.pk).values_list("bill_id", flat=True).first()
+        self._lock_draft_bills(original, self.bill_id)
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+    @transaction.atomic
+    def delete(self, *args, **kwargs):
+        self._lock_draft_bills(BillLine.objects.filter(pk=self.pk).values_list("bill_id", flat=True).first())
+        return super().delete(*args, **kwargs)
+
+    @property
+    def total(self):
+        return (self.quantity * self.unit_price).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+class SupplierPayment(AppendOnlyRecord):
+    """Money paid to a supplier: debit AP, credit cash. Allocations apply it to bills; the rest is a prepayment."""
+
+    objects = SupplierPaymentQuerySet.as_manager()
+
+    supplier = models.ForeignKey(Supplier, on_delete=models.PROTECT, related_name="payments")
+    reference = models.CharField(max_length=100, unique=True)
+    amount = models.DecimalField(max_digits=18, decimal_places=2)
+    currency = models.CharField(max_length=3, default=BASE_CURRENCY)
+    paid_on = models.DateField()
+    journal_entry = models.OneToOneField("JournalEntry", on_delete=models.PROTECT, related_name="supplier_payment")
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(check=models.Q(amount__gt=0), name="supplier_payment_positive"),
+            models.CheckConstraint(check=models.Q(currency__in=INVOICE_CURRENCIES),
+                                   name="supplier_payment_currency_supported"),
+        ]
+
+    @property
+    def unapplied_amount(self):
+        return self.amount - _stored_total(self, "allocated_total", "allocations")
+
+
+class SupplierPaymentAllocation(AppendOnlyRecord):
+    """Applies part of a supplier payment to a posted bill. No ledger effect."""
+
+    objects = APQuerySet.as_manager()
+
+    payment = models.ForeignKey(SupplierPayment, on_delete=models.PROTECT, related_name="allocations")
+    bill = models.ForeignKey(Bill, on_delete=models.PROTECT, related_name="allocations")
+    reference = models.CharField(max_length=100, unique=True)
+    amount = models.DecimalField(max_digits=18, decimal_places=2)
+    allocated_on = models.DateField()
+
+    class Meta:
+        constraints = [models.CheckConstraint(check=models.Q(amount__gt=0), name="supplier_allocation_positive")]

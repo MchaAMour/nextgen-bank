@@ -179,6 +179,7 @@ payment, and balanced-ledger tests.
 ### Goal 5 — AP supplier bills
 
 - Add suppliers, bills, lines, approvals, payment allocations, and AP aging.
+  *Done ([Accounts payable](AP_WORKFLOWS.md)), with supplier statements.*
 
 **Commit:** `feat: add accounts payable workflow`
 
@@ -194,8 +195,8 @@ tests.
   done: import, matching and reconciliation for 1000
   ([Bank reconciliation](BANK_RECONCILIATION.md)).*
 - Add balance sheet, profit and loss, customer/supplier statements, and audit
-  history. *Done except supplier statements, which need AP (Goal 5)
-  ([Financial reports](FINANCIAL_REPORTS.md)).*
+  history. *Done ([Financial reports](FINANCIAL_REPORTS.md); supplier
+  statements in [Accounts payable](AP_WORKFLOWS.md)).*
 
 **Commit:** `feat: add reconciliation and financial reports`
 

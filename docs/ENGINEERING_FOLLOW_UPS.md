@@ -107,18 +107,30 @@ regression test or documented verification; record the evidence here.
   and reject raw updates and deletes. One-off PostgreSQL 16 run: 243 accounting
   tests passed; 0011 reversed and reapplied.
 
+- AP (migration `0012_accounts_payable`): 13 tests in
+  `test_accounts_payable.py` cover approval by a second user, posting by
+  account, line-account rules, draft replace and delete, partial payments, a
+  prepayment, aging on three dates equal to the AP ledger, supplier statements,
+  cancellation with and without allocations, bank matching of supplier payments,
+  raw-SQL rejection by the triggers (skipping approval, self-approval, posted
+  changes, over-allocation, foreign payment entries) and the API with separate
+  clerk and approver permissions and audit actors. 0012 reversed and reapplied
+  on SQLite and PostgreSQL 16; one-off PostgreSQL run: 256 accounting tests
+  passed.
+
 ## Scope checkpoints
 
 - Ledger reporting is read-only; do not describe the ledger as production-ready.
-- Goal 3 (AR) workflows and their tests pass on SQLite and in a one-off
-  PostgreSQL run. Without a PostgreSQL CI job (PG-01) and role setup
-  (AUTH-01), AR is not production-ready either.
+- Goals 3 to 6 (AR, Stripe, AP, reconciliation, reports, audit) pass on
+  SQLite and in one-off PostgreSQL runs. Without a PostgreSQL CI job (PG-01),
+  role setup (AUTH-01) and the open Stripe items, none of it is
+  production-ready.
 
 ## Latest verification
 
-Reports and audit stage (Goal 6, step 4): `make test` ran 244 SQLite tests,
-all passed; `make check` reported no issues; `makemigrations --check` found no
-changes. A one-off PostgreSQL 16 run passed all 243 accounting tests.
+AP stage (Goal 5): `make test` ran 257 SQLite tests, all passed;
+`makemigrations --check` found no changes. A one-off PostgreSQL 16 run passed
+all 256 accounting tests.
 One live test-mode Checkout payment succeeded end to end (STRIPE-04); the
 balance sync has not run against Stripe yet (waiting for the dedicated
 sandbox). PG-01 (a PostgreSQL test job)

@@ -1,5 +1,8 @@
 from django.urls import path
 
+from .ap_views import (APAgingReport, BillApprove, BillCancel, BillDetail, BillList, BillPost,
+    SupplierAllocationCreate, SupplierDetail, SupplierList, SupplierPaymentDetail, SupplierPaymentList,
+    SupplierStatement)
 from .ar_views import (AgingReport, CreditNoteList, CustomerDetail, CustomerList, InvoiceCancel,
     InvoiceCheckout, InvoiceDetail, InvoiceList, InvoicePost, PaymentAllocationCreate, PaymentDetail,
     PaymentList, PaymentRefundCreate)
@@ -29,6 +32,19 @@ urlpatterns = [
     path("payments/<uuid:pk>/refunds/", PaymentRefundCreate.as_view(), name="payment-refunds"),
     path("credit-notes/", CreditNoteList.as_view(), name="credit-notes"),
     path("ar-aging/", AgingReport.as_view(), name="ar-aging"),
+    path("suppliers/", SupplierList.as_view(), name="suppliers"),
+    path("suppliers/<uuid:pk>/", SupplierDetail.as_view(), name="supplier-detail"),
+    path("suppliers/<uuid:pk>/statement/", SupplierStatement.as_view(), name="supplier-statement"),
+    path("bills/", BillList.as_view(), name="bills"),
+    path("bills/<uuid:pk>/", BillDetail.as_view(), name="bill-detail"),
+    path("bills/<uuid:pk>/approve/", BillApprove.as_view(), name="bill-approve"),
+    path("bills/<uuid:pk>/post/", BillPost.as_view(), name="bill-post"),
+    path("bills/<uuid:pk>/cancel/", BillCancel.as_view(), name="bill-cancel"),
+    path("supplier-payments/", SupplierPaymentList.as_view(), name="supplier-payments"),
+    path("supplier-payments/<uuid:pk>/", SupplierPaymentDetail.as_view(), name="supplier-payment-detail"),
+    path("supplier-payments/<uuid:pk>/allocations/", SupplierAllocationCreate.as_view(),
+         name="supplier-payment-allocations"),
+    path("ap-aging/", APAgingReport.as_view(), name="ap-aging"),
     path("bank-statements/", StatementList.as_view(), name="bank-statements"),
     path("bank-statements/import-csv/", StatementCsvImport.as_view(), name="bank-statement-csv"),
     path("bank-statements/auto-match/", AutoMatch.as_view(), name="bank-auto-match"),
