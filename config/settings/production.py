@@ -9,31 +9,40 @@ prod_env_file = path.join(BASE_DIR, ".envs", ".env.production")
 if path.isfile(prod_env_file):
     load_dotenv(prod_env_file)
 
+
+def env_flag(name, default=False):
+    """Environment strings are always truthy; only 'true', '1' or 'yes' turn a flag on."""
+    value = getenv(name)
+    return default if value is None else value.strip().lower() in {"true", "1", "yes"}
+
+
 SECRET_KEY = getenv("SECRET_KEY")
 
-DEBUG = getenv("DEBUG")
+DEBUG = env_flag("DEBUG")
 
 SITE_NAME = getenv("SITE_NAME")
 
-ADMINS = [("Alpha Omondi Ogilo", "api.imperfect@gmail.com")]
+ADMINS = [("Admin", getenv("ADMIN_EMAIL", ""))]
 
-ALLOWED_HOSTS = [".trainingwebdev.com"]
+# The public host name, e.g. next-gen-bank.srv1915831.hstgr.cloud; TLS ends at the edge proxy (Caddy).
+DOMAIN = getenv("DOMAIN")
+
+ALLOWED_HOSTS = [DOMAIN]
 
 ADMIN_URL = getenv("ADMIN_URL")
 
 EMAIL_BACKEND = "djcelery_email.backends.CeleryEmailBackend"
 EMAIL_HOST = getenv("EMAIL_HOST")
-EMAIL_HOST_USER = getenv("EMAIL_HOST_USER")
-EMAIL_HOST_PASSWORD = getenv("SMTP_MAILGUN_PASSWORD")
+EMAIL_HOST_USER = getenv("EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = getenv("EMAIL_HOST_PASSWORD", "")
 EMAIL_PORT = getenv("EMAIL_PORT")
-EMAIL_USE_TLS = True
+EMAIL_USE_TLS = env_flag("EMAIL_USE_TLS", default=True)
 DEFAULT_FROM_EMAIL = getenv("DEFAULT_FROM_EMAIL")
-DOMAIN = getenv("DOMAIN")
 ADMIN_EMAIL = getenv("ADMIN_EMAIL")
 
 MAX_UPLOAD_SIZE = 1 * 1024 * 1024
 
-CSRF_TRUSTED_ORIGINS = ["https://api.trainingwebdev.com", "https://trainingwebdev.com"]
+CSRF_TRUSTED_ORIGINS = [f"https://{DOMAIN}"]
 
 LOCKOUT_DURATION = timedelta(minutes=10)
 
@@ -41,18 +50,22 @@ LOGIN_ATTEMPTS = 3
 
 OTP_EXPIRATION = timedelta(minutes=1)
 
+# nginx passes on the scheme Caddy saw, so Django knows the request arrived over HTTPS.
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
-SECURE_SSL_REDIRECT = getenv("SECURE_SSL_REDIRECT")
+SECURE_SSL_REDIRECT = env_flag("SECURE_SSL_REDIRECT", default=True)
 
 SESSION_COOKIE_SECURE = True
 
 CSRF_COOKIE_SECURE = True
 
+COOKIE_SECURE = True
+
 SECURE_HSTS_SECONDS = 300
 
-SECURE_HSTS_INCLUDE_SUBDOMAINS = getenv("SECURE_HSTS_INCLUDE_SUBDOMAINS")
+# Off by default: the parent domain belongs to the hosting provider.
+SECURE_HSTS_INCLUDE_SUBDOMAINS = env_flag("SECURE_HSTS_INCLUDE_SUBDOMAINS")
 
-SECURE_HSTS_PRELOAD = getenv("SECURE_HSTS_PRELOAD")
+SECURE_HSTS_PRELOAD = env_flag("SECURE_HSTS_PRELOAD")
 
-SECURE_CONTENT_TYPE_NOSNIFF = getenv("SECURE_CONTENT_TYPE_NOSNIFF")
+SECURE_CONTENT_TYPE_NOSNIFF = env_flag("SECURE_CONTENT_TYPE_NOSNIFF", default=True)

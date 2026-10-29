@@ -68,3 +68,21 @@ stripe-webhook-secret:
 
 stripe-listen:
 	@$(STRIPE_CLI) listen --events $(STRIPE_EVENTS) --forward-to localhost:8080/api/v1/accounting/stripe/webhook/
+
+# Demo production stack on this server, behind the shared edge Caddy (docs/DEPLOYMENT.md).
+PROD = docker compose -f production.yml
+
+prod-up:
+	$(PROD) up -d --build --remove-orphans
+
+prod-down:
+	$(PROD) down
+
+prod-logs:
+	$(PROD) logs -f --tail 100
+
+prod-ps:
+	$(PROD) ps
+
+prod-manage:
+	$(PROD) exec api python manage.py $(cmd)
