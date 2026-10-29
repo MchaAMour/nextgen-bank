@@ -1,3 +1,7 @@
+# Every published port binds to 127.0.0.1: this machine is a public server, and
+# Docker-published ports bypass ufw. From a laptop, tunnel them over SSH:
+#   ssh -N -L 8080:localhost:8080 -L 8025:localhost:8025 -L 5555:localhost:5555 \
+#       -L 15672:localhost:15672 -L 5432:localhost:5432 root@185.166.39.74
 services:
     api: &api
         build:
@@ -32,7 +36,7 @@ services:
             context: .
             dockerfile: ./docker/local/postgres/Dockerfile
         ports:
-            - "5432:5432"
+            - "127.0.0.1:5432:5432"
         volumes:
             - banker_local_db:/var/lib/postgresql/data
             - ./backups:/backups
@@ -44,8 +48,8 @@ services:
     mailpit:
         image: docker.io/axllent/mailpit:v1.20.3
         ports:
-            - "8025:8025"
-            - "1025:1025"
+            - "127.0.0.1:8025:8025"
+            - "127.0.0.1:1025:1025"
         volumes:
             - banker_mailpit_db:/data
         environment:
@@ -65,8 +69,8 @@ services:
     rabbitmq:
         image: rabbitmq:3-management
         ports:
-            - "5672:5672"
-            - "15672:15672"
+            - "127.0.0.1:5672:5672"
+            - "127.0.0.1:15672:15672"
         volumes:
             - rabbitmq_data:/var/lib/rabbitmq
             - rabbitmq_log:/var/log/rabbitmq
@@ -80,7 +84,7 @@ services:
     flower:
         <<: *api
         ports:
-            - "5555:5555"
+            - "127.0.0.1:5555:5555"
         volumes:
             - flower_db:/app/flower_db
         command: /start-flower.sh
@@ -105,7 +109,7 @@ services:
             dockerfile: Dockerfile
         restart: always
         ports:
-            - "8080:80"
+            - "127.0.0.1:8080:80"
         volumes:
             - ./staticfiles:/app/staticfiles
             - logs_store:/var/log/nginx
