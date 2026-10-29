@@ -40,7 +40,8 @@ def test_roles_are_least_privilege():
     for role in ROLES:
         assert not any(codename.startswith(("change_journal", "delete_journal", "change_audit", "delete_audit"))
                        for codename in perms(role)), role
-    assert perms("Controller") == set().union(*(perms(role) for role in ROLES if role != "Controller"))
+    others = set().union(*(perms(role) for role in ROLES if role != "Controller"))
+    assert perms("Controller") == others | {"add_periodclose"} and "add_periodclose" not in others
 
 
 def as_member(role, number):

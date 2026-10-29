@@ -1,7 +1,7 @@
 """Balance sheet, profit and loss, and customer statements from the posted ledger and the AR subledger.
 
-There is no period closing yet, so retained earnings (3000) hold only what was posted
-to them, and the balance sheet shows profit since the first entry as current earnings.
+Year-end closes move profit to retained earnings (3000); the balance sheet shows profit
+not yet transferred as current earnings, and profit and loss leaves closing entries out.
 """
 
 from decimal import Decimal
@@ -64,8 +64,10 @@ def balance_sheet(*, as_of):
 def profit_and_loss(*, start_date, end_date):
     if start_date > end_date:
         raise ValidationError("The start date must not be after the end date.")
-    groups = _account_balances(_ledger_lines(entry__entry_date__gte=start_date, entry__entry_date__lte=end_date),
-                               INCOME_TYPES)
+    # Year-end closing entries move profit to retained earnings; they are not income or expense.
+    lines = _ledger_lines(entry__entry_date__gte=start_date, entry__entry_date__lte=end_date).exclude(
+        entry__source_type="period_close")
+    groups = _account_balances(lines, INCOME_TYPES)
     income, expenses = _section(groups["income"]), _section(groups["expense"])
     return {"start_date": start_date, "end_date": end_date, "income": income, "expenses": expenses,
             "net_income": income["total"] - expenses["total"]}

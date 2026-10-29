@@ -26,7 +26,7 @@ regression test or documented verification; record the evidence here.
 | AR-02 | Medium / closed | Draft creation re-reads and locks the customer. PostgreSQL two-connection test: a draft started during an uncommitted deactivation waits for it (about 1 s) and is then rejected. |
 | AR-03 | High / closed | Closed by migration 0005: lifecycle check constraints, SQLite/PostgreSQL triggers for invoices, lines and receipts, rejected bulk AR writes, and parent-locked draft line writes. Evidence under Completed safeguards. Journal-line equivalents remain INT-01/INT-02. |
 | AR-04 | Medium / closed | References and credit-note numbers are unique and identical retries replay. PostgreSQL two-connection test: two payments reusing one reference concurrently commit exactly one payment and one journal entry; the other request gets IntegrityError (409 in the API) or a mismatch error. |
-| AR-05 | Medium / open | Tax (MONEY-01) and period closing remain. Invoices with allocations or credit notes cannot be cancelled, and allocations cannot be released, so a paid invoice cannot be corrected and refunded yet. Refunds, credit notes and payment-to-many-invoice allocations are done. |
+| AR-05 | Medium / partly addressed | Period closing is done (migration 0014): closes lock posting through a date in the services and the database, and year ends move profit to retained earnings. Still open: releasing allocations, so a paid invoice can be corrected and an allocated Stripe payment refunded; tax remains undecided (MONEY-01). |
 
 ## Completed safeguards
 
@@ -123,6 +123,14 @@ regression test or documented verification; record the evidence here.
   `make test-postgres` the full suite (279 tests, including the settings test,
   which now accepts the PostgreSQL test settings) passes; 0013 reversed and
   reapplied on both databases.
+
+- Period closing (migration `0014_period_close`): 6 tests in
+  `test_period_close.py` cover posting refused on and before a closed date
+  (service and raw SQL), forward-only closes, drafts blocking a close,
+  immutable closes, two year ends moving profit to retained earnings with the
+  balance sheet balanced and profit and loss unchanged, and corrections in the
+  next period. 289 SQLite and 293 PostgreSQL tests pass; 0014 reversed and
+  reapplied on both.
 
 ## Scope checkpoints
 

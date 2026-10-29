@@ -876,3 +876,22 @@ class SupplierPaymentAllocation(AppendOnlyRecord):
 
     class Meta:
         constraints = [models.CheckConstraint(check=models.Q(amount__gt=0), name="supplier_allocation_positive")]
+
+
+class PeriodClose(AppendOnlyRecord):
+    """Books are closed through `closed_through`: nothing may be posted on or before it.
+
+    Closing is final; corrections are posted in the next open period. A close may also
+    have posted a closing entry moving income and expense balances to retained earnings.
+    """
+
+    objects = GuardedQuerySet.as_manager()
+
+    closed_through = models.DateField(unique=True)
+    closing_entry = models.OneToOneField("JournalEntry", null=True, blank=True, on_delete=models.PROTECT,
+                                         related_name="period_close")
+    closed_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.PROTECT,
+                                  related_name="period_closes")
+
+    class Meta:
+        ordering = ["-closed_through"]

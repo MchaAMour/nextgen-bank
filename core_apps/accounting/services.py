@@ -6,7 +6,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from .models import (BASE_CURRENCY, AuditEvent, ChartOfAccount, CreditNote, Customer, CustomerPayment, Invoice, InvoiceLine,
-    JournalEntry, JournalLine, PaymentAllocation, PaymentRefund)
+    JournalEntry, JournalLine, PaymentAllocation, PaymentRefund, PeriodClose)
 
 
 def audit(action, obj, summary, *, actor=None, **details):
@@ -81,6 +81,11 @@ def delete_draft_invoice(invoice, *, actor=None):
 User = get_user_model()
 
 
+def books_closed_through():
+    """The latest closed date, or None; nothing may be posted on or before it."""
+    return PeriodClose.objects.order_by("-closed_through").values_list("closed_through", flat=True).first()
+
+
 def post_journal_entry(entry: JournalEntry, *, posted_by: User | None = None) -> JournalEntry:
     """Validate and atomically post a balanced draft journal entry."""
     with transaction.atomic():
@@ -99,6 +104,10 @@ def post_journal_entry(entry: JournalEntry, *, posted_by: User | None = None) ->
         currencies = {line.currency for line in lines}
         if len(currencies) != 1:
             raise ValidationError("A journal entry must use one currency.")
+
+        closed_through = books_closed_through()
+        if closed_through and locked_entry.entry_date <= closed_through:
+            raise ValidationError(f"The books are closed through {closed_through}; post in an open period.")
 
         total_debits = sum((line.debit for line in lines), Decimal("0.00"))
         total_credits = sum((line.credit for line in lines), Decimal("0.00"))

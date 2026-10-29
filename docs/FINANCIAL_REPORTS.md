@@ -15,14 +15,30 @@ start with `/api/v1/accounting/`.
 ## Balance sheet
 
 Assets, liabilities and equity with each account's balance in its normal
-direction (accounts with a zero balance are left out). There is no period
-closing yet, so profit since the first entry appears in equity as
-`current_earnings`. `balanced` checks assets = liabilities + equity.
+direction (accounts with a zero balance are left out). Profit not yet moved to
+retained earnings by a year-end close appears in equity as `current_earnings`. `balanced` checks assets = liabilities + equity.
 
 ## Profit and loss
 
 Income and expense movements between the two dates, inclusive, and
-`net_income`. Over all dates it equals the balance sheet's current earnings.
+`net_income`. Year-end closing entries are left out, so a closed year still
+shows its profit. Until the first year-end close, profit over all dates equals
+the balance sheet's current earnings.
+
+## Period closing
+
+`POST periods/ {"through": "2026-01-31", "transfer_earnings": false}`
+(permissions `add_periodclose`, `add_journalentry`; Controller role) closes the
+books through that date: nothing can be posted on or before it, by the services
+or directly in the database (migration `0014_period_close`). Closes only move
+forward, need every draft entry in the period posted or deleted first, and are
+final; corrections are posted in the next open period, for example an invoice
+cancellation dated after the close. Stripe or bank items dated in a closed
+period stay in review with the reason.
+
+With `transfer_earnings: true` (a year end), a closing entry dated `through`
+first moves every income and expense balance to retained earnings (3000).
+`GET periods/` lists closes (`view_periodclose`).
 
 ## Customer statement
 

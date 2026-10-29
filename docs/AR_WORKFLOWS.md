@@ -146,7 +146,7 @@ them to exactly these permissions, so it is safe to run again after upgrades:
 | AP clerk | Suppliers, draft bills, supplier payments and allocations |
 | AP approver | Approve, post and cancel bills |
 | Reconciler | Import bank statements, match lines, post bank-only items, sync Stripe |
-| Controller | All of the above |
+| Controller | All of the above, and closing periods |
 
 Every group can read. No group can change or delete journal entries, lines or
 audit events. A bill's creator still cannot approve it, even with both AP roles.

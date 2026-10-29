@@ -19,7 +19,8 @@ ROLES = {
     "Reconciler": [VIEW_ALL, "add_bankstatement", "add_bankstatementline", "add_bankmatch", "delete_bankmatch",
                    "add_journalentry", "add_stripebalancetransaction"],
 }
-ROLES["Controller"] = sorted({codename for codenames in ROLES.values() for codename in codenames})
+# Only controllers close periods.
+ROLES["Controller"] = sorted({codename for codenames in ROLES.values() for codename in codenames} | {"add_periodclose"})
 
 
 def _permissions(codenames):

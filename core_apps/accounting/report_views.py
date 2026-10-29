@@ -1,12 +1,13 @@
 from django.shortcuts import get_object_or_404
 from django_filters import rest_framework as filters
-from rest_framework import generics, serializers
+from rest_framework import generics, serializers, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .ar_views import AgingQuery, run_service
 from .financial_reports import balance_sheet, customer_statement, profit_and_loss
-from .models import AuditEvent, Customer
+from .models import AuditEvent, Customer, PeriodClose
+from .period_close import close_period
 from .permissions import AccountingPermission
 from .views import LedgerPagination, report_json
 
@@ -78,3 +79,30 @@ class AuditEventList(generics.ListAPIView):
     pagination_class = LedgerPagination
     filter_backends = [filters.DjangoFilterBackend]
     filterset_class = AuditEventFilter
+
+
+class PeriodCloseSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PeriodClose
+        fields = ["id", "closed_through", "closing_entry", "closed_by", "created_at"]
+
+
+class PeriodCloseInput(serializers.Serializer):
+    through = serializers.DateField()
+    transfer_earnings = serializers.BooleanField(default=False)
+
+
+class PeriodCloseList(generics.ListAPIView):
+    """GET lists closes, newest first; POST closes the books through a date."""
+    permission_classes = [AccountingPermission]
+    required_permissions = ["accounting.view_periodclose"]
+    write_permissions = {"POST": ["accounting.add_periodclose", "accounting.add_journalentry"]}
+    serializer_class = PeriodCloseSerializer
+    queryset = PeriodClose.objects.order_by("-closed_through")
+    pagination_class = LedgerPagination
+
+    def post(self, request):
+        query = PeriodCloseInput(data=request.data)
+        query.is_valid(raise_exception=True)
+        close = run_service(close_period, actor=request.user, **query.validated_data)
+        return Response(PeriodCloseSerializer(close).data, status=status.HTTP_201_CREATED)

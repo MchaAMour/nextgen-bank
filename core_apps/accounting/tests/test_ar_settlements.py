@@ -262,7 +262,9 @@ def test_receipts_migrate_to_single_allocation_payments():
         apps.get_model("accounting", "InvoiceLine").objects.create(
             invoice=invoice, description="Work", quantity=1, unit_price=Decimal("100"))
         invoice = Invoice.objects.get(pk=invoice.pk)
-        with patch("core_apps.accounting.services.audit"):  # The 0005 schema has no audit table.
+        # The 0005 schema has no audit or period tables.
+        with patch("core_apps.accounting.services.audit"), \
+                patch("core_apps.accounting.services.books_closed_through", return_value=None):
             post_invoice(invoice)
             entry = _post_pair(debit_code="1000", credit_code="1100", amount=Decimal("40"), currency="EUR",
                 source_type="invoice", source_id=invoice.pk, entry_date=DAY, memo="Receipt R-OLD")
