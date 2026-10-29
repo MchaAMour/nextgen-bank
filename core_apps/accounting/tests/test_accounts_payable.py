@@ -11,7 +11,7 @@ from core_apps.accounting.ap_services import (allocate_supplier_payment, approve
     create_draft_bill, delete_draft_bill, post_bill, record_supplier_payment, replace_draft_bill,
     supplier_statement)
 from core_apps.accounting.bank_reconciliation import import_bank_statement
-from core_apps.accounting.models import AuditEvent, Bill, BillLine, ChartOfAccount, JournalLine, Supplier
+from core_apps.accounting.models import AuditEvent, Bill, BillLine, ChartOfAccount, JournalEntry, JournalLine, Supplier
 from .test_ar_integrity import db_id, new_id, raw
 from .test_ar_write_api import grant
 
@@ -58,7 +58,7 @@ def posted(supplier, clerk, approver):
 
 
 def ap_balance(as_of=None):
-    lines = JournalLine.objects.filter(account__code="2000", entry__status="posted")
+    lines = JournalLine.objects.filter(account__code="2000", entry__status__in=JournalEntry.IN_LEDGER)
     if as_of:
         lines = lines.filter(entry__entry_date__lte=as_of)
     return sum((line.credit - line.debit for line in lines), Decimal("0"))

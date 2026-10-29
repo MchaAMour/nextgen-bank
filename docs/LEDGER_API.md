@@ -36,9 +36,9 @@ to include all recorded history up to end_date. Supplying both dates reports
 movement during that period; it is not a closing balance with brought-forward
 amounts. Currency filters require three uppercase letters.
 
-Draft entries are excluded. Reversed originals remain included because a
-posted correcting entry must offset them. A reversal workflow is still to be
-implemented. Accounts with no matching posted lines are omitted.
+Draft entries are excluded. Reversed originals remain included because their
+posted reversal offsets them (see below). Accounts with no matching posted
+lines are omitted.
 
 Trial balance groups currencies separately and calculates net debits or net
 credits for each account. Its `balanced` flag compares those totals. A report
@@ -54,10 +54,34 @@ GET /api/v1/accounting/trial-balance/?end_date=2026-01-31&currency=EUR
 ## Development verification
 
 Run `make test` and `make check`. The isolated container uses SQLite and does
-not require Stripe keys or the development database. Before production use,
-PostgreSQL-specific concurrency and decimal aggregation require integration
-tests. Public journal QuerySet bulk writes are prohibited, including for drafts;
-use validated instance operations. Save/delete guards consult persisted state,
-including a line's original parent, to reject stale-object mutation of posted
-history. Raw SQL and private ORM methods remain outside these guards. Database
-enforcement and concurrent edit/post tests are still needed before write APIs.
+not require Stripe keys or the development database. `make test-postgres` runs
+the same suite against a disposable PostgreSQL 16, including the concurrency
+tests that SQLite cannot run. Public journal QuerySet bulk writes are
+prohibited, including for drafts; use validated instance operations.
+Save/delete guards consult persisted state, including a line's original parent,
+to reject stale-object mutation of posted history, and the database triggers
+below reject raw SQL and private ORM writes.
+
+## Integrity and reversals
+
+Migration `0013_ledger_integrity` enforces the ledger rules in the database
+(SQLite and PostgreSQL), so raw SQL and private ORM writes are rejected too:
+
+- Entries are inserted as drafts and posted only with at least two lines whose
+  debits equal their credits. Posted entries change only by being marked
+  `reversed`, after an entry reversing them is posted. Only drafts can be
+  deleted.
+- Lines change only while their entry is a draft. Line writes lock the entry
+  row, as posting does, so a posting and a line edit cannot interleave.
+- Each line has exactly one positive side.
+- An account with posted lines keeps its code and type; it can be renamed or
+  deactivated.
+
+`reverse_journal_entry(entry, entry_date=...)` posts an entry with every
+line's sides swapped (`reversal_of` points at the original) and marks the
+original `reversed`, atomically; a second reversal is refused. Reversals may
+post to accounts deactivated since. Reports keep both entries, which offset
+each other. Invoice and bill cancellations use it.
+
+A user who posted entries cannot be deleted, because their entries cannot
+change; deactivate the user instead.

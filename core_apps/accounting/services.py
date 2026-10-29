@@ -119,11 +119,14 @@ def post_journal_entry(entry: JournalEntry, *, posted_by: User | None = None) ->
 
 
 def post_lines(lines, *, currency, source_type, source_id, entry_date, memo, actor=None, reversal_of=None):
-    """Create and post one entry from (account code, debit, credit) lines; zero-amount lines are skipped."""
+    """Create and post one entry from (account code, debit, credit) lines; zero-amount lines are skipped.
+
+    Reversals may post to accounts deactivated since the original entry.
+    """
     lines = [(code, debit, credit) for code, debit, credit in lines if debit or credit]
     codes = {code for code, _, _ in lines}
     accounts = {a.code: a for a in ChartOfAccount.objects.filter(code__in=codes)}
-    if len(accounts) != len(codes) or not all(a.is_active for a in accounts.values()):
+    if len(accounts) != len(codes) or (reversal_of is None and not all(a.is_active for a in accounts.values())):
         raise ValidationError("Required posting accounts are missing or inactive.")
     entry = JournalEntry.objects.create(entry_date=entry_date, memo=memo,
         source_type=source_type, source_id=source_id, reversal_of=reversal_of)
@@ -131,6 +134,28 @@ def post_lines(lines, *, currency, source_type, source_id, entry_date, memo, act
         JournalLine.objects.create(entry=entry, account=accounts[code], debit=debit, credit=credit,
                                    currency=currency)
     return post_journal_entry(entry, posted_by=actor)
+
+
+@transaction.atomic
+def reverse_journal_entry(entry, *, entry_date, memo="", actor=None, source_type=None, source_id=None):
+    """Post an entry with every line's sides swapped and mark the original reversed, atomically.
+
+    Documents with their own lifecycle (invoices, bills) reverse through their cancel services.
+    """
+    entry = JournalEntry.objects.select_for_update().get(pk=entry.pk)
+    if entry.status != JournalEntry.Status.POSTED:
+        raise ValidationError("Only posted entries that are not reversed yet can be reversed.")
+    if entry_date < entry.entry_date:
+        raise ValidationError("A reversal cannot precede the original entry.")
+    lines = [(line.account.code, line.credit, line.debit) for line in entry.lines.select_related("account")]
+    reversal = post_lines(lines, currency=entry.lines.first().currency,
+                          source_type=entry.source_type if source_type is None else source_type,
+                          source_id=entry.source_id if source_id is None else source_id, entry_date=entry_date,
+                          memo=memo or f"Reversal of {entry.memo or entry.pk}", actor=actor, reversal_of=entry)
+    entry._mark_reversed()
+    audit("journal_entry.reversed", entry, f"Journal entry reversed by {reversal.pk}", actor=actor,
+          reversal=str(reversal.pk), entry_date=entry_date.isoformat())
+    return reversal
 
 
 def _post_pair(*, debit_code, credit_code, amount, **kwargs):
@@ -193,9 +218,8 @@ def cancel_invoice(invoice, *, cancellation_date, actor=None):
                               "issue a credit note for the open balance instead.")
     entry = None
     if invoice.status == "posted":
-        entry = _post_for_invoice(invoice, debit_code="4000", credit_code="1100", amount=invoice.posted_total,
-            entry_date=cancellation_date, memo=f"Cancel {invoice.number}",
-            actor=actor, reversal_of=invoice.journal_entry)
+        entry = reverse_journal_entry(invoice.journal_entry, entry_date=cancellation_date,
+                                      memo=f"Cancel {invoice.number}", actor=actor)
     # Deliberate lifecycle transition after validation under the parent row lock.
     invoice._apply_transition(status="cancelled", cancellation_entry=entry)
     audit("invoice.cancelled", invoice, f"Invoice {invoice.number} cancelled", actor=actor,

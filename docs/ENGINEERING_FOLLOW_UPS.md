@@ -6,12 +6,12 @@ regression test or documented verification; record the evidence here.
 
 | ID | Priority / status | Issue and completion criteria |
 | --- | --- | --- |
-| INT-01 | High / open | Direct status saves can bypass the journal posting service. Enforce valid lifecycle transitions and balanced, nonempty entries at the database boundary; test raw SQL and private ORM bypasses. |
-| INT-02 | High / open | Draft line writes do not share the posting service's parent lock. Serialize line edits, deletes and posting; test simultaneous operations using independent PostgreSQL connections. |
-| INT-03 | High / open | Database line constraints only enforce nonnegative amounts. Add exactly-one-positive-side and currency rules; validate preexisting data before applying constraints. |
-| INT-04 | High / open | Account type changes can reinterpret historic reports. Restrict structural changes once an account has posted lines; test account deactivation and historical reporting. |
-| PG-01 | High / open | Add isolated PostgreSQL test settings/container and CI job. Verify concurrent posting, edit/post races, rollback, decimal aggregation and later allocation races. SQLite cannot verify row locks. |
-| REV-01 | High / open | Implement atomic reversals and cancellation via correcting entries. Reconcile reversal status with existing immutability guards; test repeated reversal and original-plus-reversal totals. |
+| INT-01 | High / closed | Migration 0013: entries are inserted as drafts, post only with two or more balanced lines, change after posting only to `reversed` with an existing reversal, and only drafts can be deleted. Raw-SQL tests in `test_ledger_integrity.py`. |
+| INT-02 | High / closed | Line saves and deletes lock the parent entry like `post_journal_entry`; the PostgreSQL line trigger locks entry rows FOR SHARE. A two-connection test shows a raw line insert waiting for a concurrent posting (about 1 s) and then being rejected. |
+| INT-03 | High / closed | Check constraint `accounting_line_one_side` (exactly one positive side); the currency rule came with MONEY-01. Migration 0013 refuses to run over existing violating or unbalanced rows. |
+| INT-04 | High / closed | The code and type of an account with posted lines cannot change (model guard and trigger); renaming and deactivation stay allowed, and reports include inactive accounts. |
+| PG-01 | High / partly addressed | `make test-postgres` runs the whole suite against a disposable PostgreSQL 16 (`config/settings/test_postgres.py`, `docker/test-postgres.yml`), including two-connection tests for line edits during posting and concurrent allocations. A GitHub Actions workflow runs both suites on pushes to main; it has not run on GitHub yet. |
+| REV-01 | High / closed | `reverse_journal_entry` posts the swapped lines and marks the original `reversed` in one transaction; repeated reversal is refused by the service and the trigger. Invoice and bill cancellations use it. Tests cover offsetting totals, a failed reversal leaving the original posted, and deactivated accounts. |
 | CFG-01 | Medium / open | Test settings import base settings, which can load production dotenv values and configure Cloudinary before overrides. Isolate configuration and block external networking in tests. |
 | CFG-02 | Medium / open | Pytest dependencies exist in requirements/local.txt but not Pipfile.lock. Align supported dependency installation paths and lock transitive dependencies. |
 | AUTH-01 | Medium / open | Finance permissions currently require manual Group configuration. Add an idempotent role setup command with least-privilege tests. |
@@ -118,6 +118,12 @@ regression test or documented verification; record the evidence here.
   on SQLite and PostgreSQL 16; one-off PostgreSQL run: 256 accounting tests
   passed.
 
+- Ledger integrity (migration `0013_ledger_integrity`): 22 tests in
+  `test_ledger_integrity.py`, two of them PostgreSQL-only race tests. With
+  `make test-postgres` the full suite (279 tests, including the settings test,
+  which now accepts the PostgreSQL test settings) passes; 0013 reversed and
+  reapplied on both databases.
+
 ## Scope checkpoints
 
 - Ledger reporting is read-only; do not describe the ledger as production-ready.
@@ -128,9 +134,9 @@ regression test or documented verification; record the evidence here.
 
 ## Latest verification
 
-AP stage (Goal 5): `make test` ran 257 SQLite tests, all passed;
-`makemigrations --check` found no changes. A one-off PostgreSQL 16 run passed
-all 256 accounting tests.
+Ledger integrity stage: `make test` ran 279 tests on SQLite (277 passed, the 2
+PostgreSQL race tests skipped); `make test-postgres` passed all 279 on
+PostgreSQL 16; `makemigrations --check` found no changes.
 One live test-mode Checkout payment succeeded end to end (STRIPE-04); the
 balance sync has not run against Stripe yet (waiting for the dedicated
 sandbox). PG-01 (a PostgreSQL test job)

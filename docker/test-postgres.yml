@@ -1,0 +1,29 @@
+# Disposable PostgreSQL for `make test-postgres`; nothing is persisted.
+services:
+  test-postgres:
+    image: postgres:16-bullseye
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: nextgen_test
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+
+  tests:
+    build:
+      context: ..
+      dockerfile: ./docker/local/django/Dockerfile
+    working_dir: /app
+    volumes:
+      - ..:/app
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.test_postgres
+    entrypoint: []
+    command: pytest --create-db
+    depends_on:
+      test-postgres:
+        condition: service_healthy

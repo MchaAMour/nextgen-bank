@@ -436,6 +436,11 @@ class ChartOfAccount(TimeStampedModel):
     def save(self, *args, **kwargs) -> None:
         self.normal_balance = self.NORMAL_BALANCES[self.account_type]
         self.full_clean()
+        original = ChartOfAccount.objects.filter(pk=self.pk).values("code", "account_type").first()
+        if original and original != {"code": self.code, "account_type": self.account_type} and (
+                self.journal_lines.exclude(entry__status=JournalEntry.Status.DRAFT).exists()):
+            # Changing them would reinterpret posted history; rename or deactivate instead.
+            raise ValidationError("The code and type of an account with posted lines cannot change.")
         super().save(*args, **kwargs)
 
     def __str__(self) -> str:
@@ -496,6 +501,11 @@ class JournalEntry(TimeStampedModel):
             raise ValidationError("Posted journal entries cannot be deleted.")
         super().delete(*args, **kwargs)
 
+    def _mark_reversed(self):
+        """Service-only: called by reverse_journal_entry after posting the reversal; triggers verify it."""
+        self.status = self.Status.REVERSED
+        super().save(update_fields=["status", "updated_at"])
+
     def __str__(self) -> str:
         return f"{self.entry_date} — {self.memo or self.id}"
 
@@ -534,6 +544,10 @@ class JournalLine(TimeStampedModel):
             models.CheckConstraint(
                 check=models.Q(currency=BASE_CURRENCY), name="accounting_line_base_currency"
             ),
+            models.CheckConstraint(
+                check=models.Q(debit__gt=0, credit=0) | models.Q(debit=0, credit__gt=0),
+                name="accounting_line_one_side",
+            ),
         ]
 
     def clean(self) -> None:
@@ -547,11 +561,13 @@ class JournalLine(TimeStampedModel):
         if len(self.currency) != 3 or not self.currency.isalpha():
             raise ValidationError({"currency": _("Use a three-letter currency code.")})
 
+    @transaction.atomic
     def save(self, *args, **kwargs) -> None:
         original_entry_id = JournalLine.objects.filter(pk=self.pk).values_list(
             "entry_id", flat=True
         ).first()
-        if JournalEntry.objects.filter(
+        # Lock the parent entries like post_journal_entry, so posting and line edits serialize.
+        if JournalEntry.objects.select_for_update().filter(
             pk__in=[self.entry_id, original_entry_id]
         ).exclude(status=JournalEntry.Status.DRAFT).exists():
             raise ValidationError("Lines belonging to posted entries are immutable.")
@@ -559,11 +575,12 @@ class JournalLine(TimeStampedModel):
         self.full_clean()
         super().save(*args, **kwargs)
 
+    @transaction.atomic
     def delete(self, *args, **kwargs) -> None:
         original_entry_id = JournalLine.objects.filter(pk=self.pk).values_list(
             "entry_id", flat=True
         ).first()
-        if JournalEntry.objects.filter(
+        if JournalEntry.objects.select_for_update().filter(
             pk=original_entry_id
         ).exclude(status=JournalEntry.Status.DRAFT).exists():
             raise ValidationError("Lines belonging to posted entries cannot be deleted.")

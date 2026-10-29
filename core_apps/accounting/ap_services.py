@@ -19,7 +19,7 @@ from django.utils import timezone
 
 from .models import (BASE_CURRENCY, Bill, BillLine, ChartOfAccount, Supplier, SupplierPayment,
     SupplierPaymentAllocation)
-from .services import AGING_KEYS, _money, _replay, audit, post_lines
+from .services import AGING_KEYS, _money, _replay, audit, post_lines, reverse_journal_entry
 
 AP_ACCOUNT = "2000"
 ZERO = Decimal("0.00")
@@ -139,10 +139,8 @@ def cancel_bill(bill, *, cancellation_date, actor=None):
         raise ValidationError("Bills with allocated payments cannot be cancelled.")
     entry = None
     if bill.status == Bill.Status.POSTED:
-        original = [(l.account.code, l.credit, l.debit) for l in bill.journal_entry.lines.select_related("account")]
-        entry = post_lines(original, currency=bill.currency, source_type="bill", source_id=bill.pk,
-                           entry_date=cancellation_date, memo=f"Cancel bill {bill.number}", actor=actor,
-                           reversal_of=bill.journal_entry)
+        entry = reverse_journal_entry(bill.journal_entry, entry_date=cancellation_date,
+                                      memo=f"Cancel bill {bill.number}", actor=actor)
     bill._apply_transition(status=Bill.Status.CANCELLED, cancellation_entry=entry)
     audit("bill.cancelled", bill, f"Bill {bill.number} cancelled", actor=actor,
           cancellation_date=cancellation_date.isoformat())

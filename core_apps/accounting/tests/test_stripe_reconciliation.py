@@ -8,7 +8,7 @@ import stripe
 from django.core.exceptions import ValidationError
 from django.db.models import Sum
 
-from core_apps.accounting.models import (ChartOfAccount, JournalLine, PaymentRefund, StripeBalanceTransaction)
+from core_apps.accounting.models import ChartOfAccount, JournalEntry, JournalLine, PaymentRefund, StripeBalanceTransaction
 from core_apps.accounting.services import post_invoice, record_customer_payment, refund_payment
 from core_apps.accounting.stripe_reconciliation import (clearing_balance, reconciliation_report,
     sync_balance_transactions)
@@ -70,7 +70,7 @@ def stripe_payment(invoice, amount="100", allocate="100", payment_intent="pi_1",
 
 
 def balance(code):
-    totals = JournalLine.objects.filter(account__code=code, entry__status="posted").aggregate(
+    totals = JournalLine.objects.filter(account__code=code, entry__status__in=JournalEntry.IN_LEDGER).aggregate(
         debit=Sum("debit"), credit=Sum("credit"))
     return (totals["debit"] or 0) - (totals["credit"] or 0)
 

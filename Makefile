@@ -37,6 +37,10 @@ banker-db:
 test:
 	docker compose -f docker/test.yml run --rm --build tests
 
+test-postgres:
+	docker compose -f docker/test-postgres.yml run --rm --build tests; \
+	status=$$?; docker compose -f docker/test-postgres.yml down -v; exit $$status
+
 check:
 	docker compose -f docker/test.yml run --rm --build tests python manage.py check
 
