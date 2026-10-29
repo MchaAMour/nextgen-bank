@@ -8,6 +8,7 @@ then the payment is allocated to the invoice up to its open balance at that time
 import json
 from datetime import datetime, timedelta, timezone as dt_timezone
 from decimal import Decimal
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import stripe
 from django.conf import settings
@@ -47,6 +48,12 @@ def stripe_client():
                                        f"not STRIPE_ACCOUNT_ID {expected}.")
         _verified_accounts.add((key, expected))
     return client
+
+
+def _with_query(url, **params):
+    parts = urlsplit(url)
+    query = urlencode(parse_qsl(parts.query) + [(key, str(value)) for key, value in params.items()])
+    return urlunsplit(parts._replace(query=query))
 
 
 def _from_timestamp(value):
@@ -96,7 +103,8 @@ def create_invoice_checkout(invoice, *, actor=None):
         "metadata": metadata,
         "payment_intent_data": {"metadata": metadata},
         "success_url": settings.STRIPE_CHECKOUT_SUCCESS_URL,
-        "cancel_url": settings.STRIPE_CHECKOUT_CANCEL_URL,
+        # The cancel page offers this invoice's open session again.
+        "cancel_url": _with_query(settings.STRIPE_CHECKOUT_CANCEL_URL, invoice=invoice.pk),
         "integration_identifier": INTEGRATION_IDENTIFIER,
     }
     if invoice.customer.email:

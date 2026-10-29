@@ -27,6 +27,8 @@ urlpatterns = [
     path("api/v1/accounts/", include("core_apps.accounts.urls")),
     path("api/v1/cards/", include("core_apps.cards.urls")),
     path("api/v1/accounting/", include("core_apps.accounting.urls")),
+    # Where Stripe Checkout returns customers.
+    path("payments/", include("core_apps.accounting.payment_urls")),
 ]
 
 admin.site.site_header = "NextGen Bank Admin"

@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  {% if refresh %}<meta http-equiv="refresh" content="{{ refresh_seconds }}">{% endif %}
+  <title>{{ title }} · NextGen Bank</title>
+  <style>
+    :root { --bg: #f5f6f8; --card: #fff; --text: #1d2330; --muted: #5b6475; --line: #e3e6eb;
+            --paid: #1e7d4f; --processing: #9a6b00; --confirming: #3557b7; --failed: #b3261e; --cancelled: #5b6475; }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg: #14171c; --card: #1d2128; --text: #e8eaee; --muted: #a2a9b6; --line: #2c323b;
+              --paid: #5fcf97; --processing: #e0b54d; --confirming: #8aa4ef; --failed: #f08a82; --cancelled: #a2a9b6; }
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 16px;
+           background: var(--bg); color: var(--text); font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+    main { width: 100%; max-width: 440px; background: var(--card); border: 1px solid var(--line);
+           border-radius: 12px; padding: 32px 28px; }
+    .badge { display: inline-block; font-size: 13px; font-weight: 600; letter-spacing: .02em; text-transform: uppercase;
+             color: var(--accent); }
+    h1 { margin: 8px 0 12px; font-size: 24px; line-height: 1.25; }
+    p { margin: 0 0 20px; color: var(--muted); }
+    dl { margin: 0 0 20px; display: grid; grid-template-columns: auto 1fr; gap: 6px 16px;
+         border-top: 1px solid var(--line); padding-top: 16px; }
+    dt { color: var(--muted); }
+    dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+    a.button { display: inline-block; background: var(--confirming); color: #fff; text-decoration: none;
+               padding: 10px 18px; border-radius: 8px; font-weight: 600; }
+    .paid { --accent: var(--paid); } .processing { --accent: var(--processing); }
+    .confirming { --accent: var(--confirming); } .failed { --accent: var(--failed); }
+    .cancelled { --accent: var(--cancelled); }
+  </style>
+</head>
+<body>
+  <main class="{{ state }}">
+    <span class="badge">{{ state }}</span>
+    <h1>{{ title }}</h1>
+    <p>{{ message }}</p>
+    {% if session %}
+    <dl>
+      <dt>Invoice</dt><dd>{{ session.invoice.number }}</dd>
+      <dt>Amount</dt><dd>{{ session.amount }} {{ session.currency }}</dd>
+    </dl>
+    {% endif %}
+    {% if resume_url %}<a class="button" href="{{ resume_url }}">Return to payment</a>{% endif %}
+  </main>
+</body>
+</html>

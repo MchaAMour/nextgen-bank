@@ -33,6 +33,23 @@ developing). Django remains the ledger; Stripe only collects the money.
   currency, is the only ledger currency (MONEY-01), so Stripe amounts match the
   ledger without conversion. No tax is calculated.
 
+## Return pages
+
+Checkout returns customers to two public pages, served by Django under
+`/payments/` (nginx forwards that path):
+
+- `payments/success?session_id=...` shows the invoice, amount and status the
+  webhook recorded. Until the webhook arrives it says the payment is being
+  confirmed and reloads every 3 seconds. An unknown session is a 404.
+- `payments/cancelled?invoice=...` (the invoice is added to
+  `STRIPE_CHECKOUT_CANCEL_URL` when the session is created) says no payment
+  was taken and links back to the invoice's open session while it is valid.
+
+The pages only display state: payments are recorded by the webhook alone, so
+reloading, closing or forging these URLs changes nothing. Session and invoice
+IDs are unguessable, and the pages show nothing beyond the invoice number,
+amount and status.
+
 ## Webhook events
 
 | Event | Effect |

@@ -10,7 +10,7 @@ regression test or documented verification; record the evidence here.
 | INT-02 | High / closed | Line saves and deletes lock the parent entry like `post_journal_entry`; the PostgreSQL line trigger locks entry rows FOR SHARE. A two-connection test shows a raw line insert waiting for a concurrent posting (about 1 s) and then being rejected. |
 | INT-03 | High / closed | Check constraint `accounting_line_one_side` (exactly one positive side); the currency rule came with MONEY-01. Migration 0013 refuses to run over existing violating or unbalanced rows. |
 | INT-04 | High / closed | The code and type of an account with posted lines cannot change (model guard and trigger); renaming and deactivation stay allowed, and reports include inactive accounts. |
-| PG-01 | High / partly addressed | `make test-postgres` runs the whole suite against a disposable PostgreSQL 16 (`config/settings/test_postgres.py`, `docker/test-postgres.yml`), including two-connection tests for line edits during posting and concurrent allocations. A GitHub Actions workflow runs both suites on pushes to main; it has not run on GitHub yet. |
+| PG-01 | High / closed | `make test-postgres` runs the whole suite against a disposable PostgreSQL 16 (`config/settings/test_postgres.py`, `docker/test-postgres.yml`), including the two-connection race tests. The GitHub Actions workflow runs the SQLite and PostgreSQL suites on pushes to main and pull requests; its first run on main (run 40852556967, 2026-10-29) passed. |
 | REV-01 | High / closed | `reverse_journal_entry` posts the swapped lines and marks the original `reversed` in one transaction; repeated reversal is refused by the service and the trigger. Invoice and bill cancellations use it. Tests cover offsetting totals, a failed reversal leaving the original posted, and deactivated accounts. |
 | CFG-01 | Medium / closed | `base.py` skips `.envs/.env.production` under `config.settings.test*`, and `core_apps/conftest.py` makes any non-loopback socket connection raise in tests (database drivers connect through libpq and are unaffected). Tests: `test_tests_cannot_reach_the_network`, `test_deployment_dotenv_is_not_loaded_in_tests`. |
 | CFG-02 | Medium / closed | `requirements/` is the only dependency source and what the Docker images install; `requirements/constraints.txt` (from `make lock-requirements`) pins every transitive package to the versions the tests ran with, and both images build with it. The stale `Pipfile`/`Pipfile.lock` were removed. |
@@ -18,7 +18,7 @@ regression test or documented verification; record the evidence here.
 | MONEY-01 | Medium / decided | Decided 2026-10-28: EUR, the Stripe account's settlement currency, is the only ledger currency (migration 0008 constrains invoices, payments and journal lines; system check `accounting.E001` rejects another `ACCOUNTING_BASE_CURRENCY`). Other currencies need exchange rates and FX gain/loss accounting. Tax/VAT requirements remain undecided. |
 | OBS-01 | Low / closed | The USE_TZ warning came from `import cloudinary` in `base.py`, which read Django settings while they were half-loaded; Cloudinary is now configured in `CommonConfig.ready()` and Django setup raises no deprecation warnings. The remaining ReportLab 4.2.2 warning (its own code on Python 3.12) is filtered by message and module in `pytest.ini`; drop the filter when ReportLab is upgraded. |
 | STRIPE-01 | Medium / open | `STRIPE_SECRET_KEY` is a full test-mode secret key. Before any shared or deployed environment, replace it with a restricted key (`rk_`) limited to Checkout Sessions (write), Balance, Balance Transactions and Disputes (read), and Account (read, for the `STRIPE_ACCOUNT_ID` check), and keep it in a secrets vault. |
-| STRIPE-02 | High / partly addressed | Balance transaction sync (migrations 0009 and 0016) posts charge fees, payouts, payout reversals, Stripe fees, refunds and disputes (withdrawal to 1150, reversal back, lost disputes written off to 5110), and reports clearing (1010) against the Stripe balance; `schedule_stripe_sync` schedules it in Celery beat. Other categories are left for review with nothing posted; a refund of an allocated payment posts once the allocation is released. Remaining: a live sync against the dedicated sandbox before live mode. |
+| STRIPE-02 | High / closed | Balance transaction sync (migrations 0009 and 0016) posts charge fees, payouts, payout reversals, Stripe fees, refunds and disputes (withdrawal to 1150, reversal back, lost disputes written off to 5110), and reports clearing (1010) against the Stripe balance; `schedule_stripe_sync` schedules it in Celery beat. Other categories are left for review with nothing posted. Verified live against the dedicated sandbox on 2026-10-29 (evidence under Completed safeguards). |
 | STRIPE-03 | Medium / open | Webhooks are only set up locally through `stripe listen`. A public deployment needs a Dashboard endpoint with its own signing secret, and an allowlist of Stripe webhook IP addresses. |
 | STRIPE-04 | Medium / closed | End-to-end test-mode payment verified on 2026-10-28 (evidence under Completed safeguards). |
 | STRIPE-05 | Medium / closed | A Celery worker started before a key change synced 21 transactions of the previous sandbox into the local ledger as review items (removed; nothing was posted). Every Stripe client now checks that its key belongs to `STRIPE_ACCOUNT_ID` and refuses any other account. |
@@ -88,8 +88,10 @@ regression test or documented verification; record the evidence here.
   refunds beyond unapplied credit, unhandled categories and currencies, and the
   report (reconciled, explained by review items, unsynced payments) through the
   API with permissions, 502 and 503. 0009 reversed and reapplied on SQLite
-  (single process) and PostgreSQL 16. Not yet run against a live Stripe
-  account.
+  (single process) and PostgreSQL 16. Live run on 2026-10-29 against the
+  dedicated sandbox: invoice RECON-1 (250.00 EUR) paid through Checkout, the
+  webhook recorded the payment, and the sync posted the 8.13 EUR Stripe fee;
+  Stripe clearing and the Stripe balance were both 241.87 EUR (reconciled).
 
 - Bank statements (migration `0010_bank_statements`): 22 tests in
   `test_bank_reconciliation.py` cover import validation and chaining, replay,
@@ -137,17 +139,14 @@ regression test or documented verification; record the evidence here.
 
 - Ledger reporting is read-only; do not describe the ledger as production-ready.
 - Goals 3 to 6 (AR, Stripe, AP, reconciliation, reports, audit) pass on
-  SQLite and in one-off PostgreSQL runs. Without a PostgreSQL CI job (PG-01),
-  role setup (AUTH-01) and the open Stripe items, none of it is
+  SQLite and PostgreSQL in CI. Until the restricted key (STRIPE-01), a public
+  webhook (STRIPE-03) and a tax decision (MONEY-01), none of it is
   production-ready.
 
 ## Latest verification
 
-Ledger integrity stage: `make test` ran 279 tests on SQLite (277 passed, the 2
-PostgreSQL race tests skipped); `make test-postgres` passed all 279 on
-PostgreSQL 16; `makemigrations --check` found no changes.
-One live test-mode Checkout payment succeeded end to end (STRIPE-04); the
-balance sync has not run against Stripe yet (waiting for the dedicated
-sandbox). PG-01 (a PostgreSQL test job)
-remains open. Finance roles still need manual Group setup (AUTH-01).
-EUR is the only ledger currency (MONEY-01). Tax is not supported.
+Checkout return pages stage (2026-10-29): `make test` 320 passed and 4
+PostgreSQL-only tests skipped on SQLite; `make test-postgres` 324 passed on
+PostgreSQL 16; `makemigrations --check` found no changes. Live sandbox
+payment and balance sync reconciled (STRIPE-02); GitHub Actions passed on main
+(PG-01). EUR is the only ledger currency (MONEY-01). Tax is not supported.
