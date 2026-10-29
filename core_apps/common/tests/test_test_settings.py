@@ -28,3 +28,9 @@ def test_tests_cannot_reach_the_network():
 
 def test_deployment_dotenv_is_not_loaded_in_tests():
     assert settings.TESTING is True
+
+
+def test_cloudinary_is_configured_from_settings(settings):
+    import cloudinary
+
+    assert cloudinary.config().cloud_name == settings.CLOUDINARY_CLOUD_NAME

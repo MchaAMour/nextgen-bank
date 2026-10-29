@@ -3,7 +3,6 @@ from dotenv import load_dotenv
 from os import W_OK, access, getenv, path
 from loguru import logger
 from datetime import timedelta, date
-import cloudinary
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve(strict=True).parent.parent.parent
@@ -239,12 +238,7 @@ CELERY_BEAT_SCHEDULE = {
 CLOUDINARY_CLOUD_NAME = getenv("CLOUDINARY_CLOUD_NAME")
 CLOUDINARY_API_KEY = getenv("CLOUDINARY_API_KEY")
 CLOUDINARY_API_SECRET = getenv("CLOUDINARY_API_SECRET")
-
-cloudinary.config(
-    cloud_name=CLOUDINARY_CLOUD_NAME,
-    api_key=CLOUDINARY_API_KEY,
-    api_secret=CLOUDINARY_API_SECRET,
-)
+# Applied in CommonConfig.ready(): importing cloudinary here would read these settings half-loaded.
 
 COOKIE_NAME = "access"
 
