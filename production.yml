@@ -1,7 +1,7 @@
 # Demo production stack: runs on the same server as the local stack, behind the
 # shared edge Caddy, which terminates TLS and proxies next-gen-bank.<domain> to
-# nginx on the radian-edge network. Only Caddy publishes public ports; the two
-# ports below bind to 127.0.0.1 and are reached over an SSH tunnel.
+# gunicorn (api:8000) on the radian-edge network; WhiteNoise serves static files.
+# Only Caddy publishes public ports; the two ports below bind to 127.0.0.1 and are reached over an SSH tunnel.
 #
 # Settings and secrets live outside the repository, in /srv/next-gen-bank/.env.production
 # (see docs/DEPLOYMENT.md). Start with: make prod-up
@@ -19,7 +19,6 @@ services:
         image: next-gen-bank-django
         <<: *env
         volumes:
-            - static_volume:/app/staticfiles
             - app_logs:/app/logs
         expose:
             - "8000"
@@ -30,7 +29,10 @@ services:
         command: /start.sh
         restart: unless-stopped
         networks:
-            - internal
+            internal:
+            radian-edge:
+                aliases:
+                    - next-gen-bank-web
 
     postgres:
         build:
@@ -67,10 +69,16 @@ services:
     celeryworker:
         <<: *api
         command: /start-celeryworker.sh
+        # Off the edge network: the next-gen-bank-web alias belongs to the api alone.
+        networks:
+            - internal
 
     celerybeat:
         <<: *api
         command: /start-celerybeat.sh
+        # Off the edge network: the next-gen-bank-web alias belongs to the api alone.
+        networks:
+            - internal
 
     flower:
         <<: *api
@@ -79,6 +87,8 @@ services:
         volumes:
             - flower_db:/app/flower_db
         command: /start-flower.sh
+        networks:
+            - internal
 
     # A demo has no real mail provider: Mailpit catches every email (web UI on the tunnel port).
     mailpit:
@@ -96,23 +106,6 @@ services:
         networks:
             - internal
 
-    nginx:
-        build:
-            context: ./docker/production/nginx
-            dockerfile: Dockerfile
-        restart: unless-stopped
-        volumes:
-            - ./docker/production/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-            - static_volume:/app/staticfiles
-            - logs_store:/var/log/nginx
-        depends_on:
-            - api
-        networks:
-            internal:
-            radian-edge:
-                aliases:
-                    - next-gen-bank-web
-
 networks:
     internal:
     # The edge Caddy's network (created by /srv/radian/caddy).
@@ -121,9 +114,7 @@ networks:
 
 volumes:
     banker_prod_db:
-    static_volume:
     app_logs:
-    logs_store:
     redis_data:
     rabbitmq_data:
     rabbitmq_log:

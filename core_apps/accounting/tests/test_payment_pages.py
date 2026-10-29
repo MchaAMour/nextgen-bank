@@ -68,3 +68,8 @@ def test_cancel_page_without_a_known_invoice_shows_no_details(invoice_param):
     response = page("/payments/cancelled", invoice=invoice_param)
     assert response.status_code == 200 and "Payment cancelled" in response.content.decode()
     assert "Invoice" not in response.content.decode()
+
+
+def test_bare_domain_redirects_to_the_api_docs(client):
+    response = client.get("/")
+    assert response.status_code == 302 and response["Location"] == "/api/v1/schema/swagger-ui/"

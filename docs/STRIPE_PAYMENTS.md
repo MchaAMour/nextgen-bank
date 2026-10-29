@@ -36,7 +36,7 @@ developing). Django remains the ledger; Stripe only collects the money.
 ## Return pages
 
 Checkout returns customers to two public pages, served by Django under
-`/payments/` (nginx forwards that path):
+`/payments/`:
 
 - `payments/success?session_id=...` shows the invoice, amount and status the
   webhook recorded. Until the webhook arrives it says the payment is being

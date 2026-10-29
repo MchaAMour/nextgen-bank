@@ -1,7 +1,7 @@
 from os import getenv, path
 from dotenv import load_dotenv
 from .base import *  # noqa
-from .base import BASE_DIR
+from .base import BASE_DIR, MIDDLEWARE
 
 
 prod_env_file = path.join(BASE_DIR, ".envs", ".env.production")
@@ -42,6 +42,15 @@ ADMIN_EMAIL = getenv("ADMIN_EMAIL")
 
 MAX_UPLOAD_SIZE = 1 * 1024 * 1024
 
+# There is no web server in front of gunicorn besides the edge Caddy, so WhiteNoise
+# serves the collected static files: compressed, with hashed names cached for a year.
+MIDDLEWARE = MIDDLEWARE[:1] + ["whitenoise.middleware.WhiteNoiseMiddleware"] + MIDDLEWARE[1:]
+
+STORAGES = {
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},
+}
+
 CSRF_TRUSTED_ORIGINS = [f"https://{DOMAIN}"]
 
 LOCKOUT_DURATION = timedelta(minutes=10)
@@ -50,7 +59,7 @@ LOGIN_ATTEMPTS = 3
 
 OTP_EXPIRATION = timedelta(minutes=1)
 
-# nginx passes on the scheme Caddy saw, so Django knows the request arrived over HTTPS.
+# Caddy terminates TLS and sets X-Forwarded-Proto, so Django knows the request arrived over HTTPS.
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
 SECURE_SSL_REDIRECT = env_flag("SECURE_SSL_REDIRECT", default=True)

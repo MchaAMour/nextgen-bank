@@ -10,10 +10,9 @@ behaviour of each area is in the topic documents listed at the end.
 flowchart LR
     browser([Browser / API client]) -->|HTTPS| caddy[Edge Caddy<br/>TLS, shared with other sites]
     stripe([Stripe]) -->|signed webhooks| caddy
-    caddy -->|HTTP, radian-edge network| nginx
+    caddy -->|HTTP, radian-edge network| api
     subgraph next-gen-bank [compose project next-gen-bank]
-        nginx -->|/api/v1/, /payments/, admin| api[Django + gunicorn]
-        nginx -->|/static/| static[(static volume)]
+        api[Django + gunicorn<br/>WhiteNoise for /static/]
         api --> pg[(PostgreSQL 16)]
         api --> redis[(Redis cache)]
         api -->|tasks| rabbit[[RabbitMQ]]
@@ -26,8 +25,9 @@ flowchart LR
 ```
 
 - **Edge**: Caddy terminates TLS and is the only container that publishes public
-  ports. nginx serves static files and proxies the rest. Django trusts
-  `X-Forwarded-Proto` from nginx (`SECURE_PROXY_SSL_HEADER`). See
+  ports. It proxies straight to gunicorn; there is no nginx. WhiteNoise serves
+  the static files from the api container. Django trusts `X-Forwarded-Proto`
+  from Caddy (`SECURE_PROXY_SSL_HEADER`). See
   [DEPLOYMENT.md](DEPLOYMENT.md).
 - **Database**: PostgreSQL is the system of record. Accounting rules are
   enforced twice: in the service layer and in database triggers and

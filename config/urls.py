@@ -1,6 +1,7 @@
 from django.conf import settings
 from django.contrib import admin
 from django.urls import path, include
+from django.views.generic import RedirectView
 from drf_spectacular.views import (
     SpectacularAPIView,
     SpectacularRedocView,
@@ -9,6 +10,8 @@ from drf_spectacular.views import (
 
 
 urlpatterns = [
+    # The app is an API; send visitors of the bare domain to its docs.
+    path("", RedirectView.as_view(pattern_name="swagger-ui", permanent=False)),
     path(settings.ADMIN_URL, admin.site.urls),
     path("api/v1/schema/", SpectacularAPIView.as_view(), name="schema"),
     path(

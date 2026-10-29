@@ -12,7 +12,7 @@ broker and Stripe sandbox.
 | Compose project | `production.yml`, project `next-gen-bank` |
 | Settings and secrets | `/srv/next-gen-bank/.env.production` (root only, mode 600, never committed) |
 | TLS and public ports | The shared edge Caddy (`radian-edge-caddy-1`), site file `/srv/radian/caddy/sites/next-gen-bank.caddy` |
-| Edge network | nginx joins the external `radian-edge` network as `next-gen-bank-web`; everything else stays on the project's internal network |
+| Edge network | The api (gunicorn, port 8000) joins the external `radian-edge` network as `next-gen-bank-web`; everything else stays on the project's internal network. There is no nginx: Caddy proxies to gunicorn and WhiteNoise serves `/static/` |
 | Email | Mailpit inside the stack catches all mail; set `EMAIL_HOST`, `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD` and `EMAIL_USE_TLS` for a real SMTP provider |
 | Stripe | Sandbox `banking-demo` (`acct_1UVselELdbrRRAW5`), restricted key; the local stack uses `banking-test`. Each Stripe account must belong to one ledger only, or neither reconciles. |
 
