@@ -2,7 +2,7 @@ import logging
 
 import stripe
 from django.core.exceptions import ValidationError as DjangoValidationError
-from django.db import IntegrityError
+from django.db import IntegrityError, transaction
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import exceptions, generics, serializers, status
@@ -13,7 +13,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 from .models import (BASE_CURRENCY, CreditNote, Customer, CustomerPayment, Invoice, InvoiceLine, PaymentAllocation, PaymentRefund,
     StripeCheckoutSession)
 from .permissions import AccountingPermission
-from .services import (allocate_payment, cancel_invoice, create_draft_invoice, delete_draft_invoice,
+from .services import (allocate_payment, audit, cancel_invoice, create_draft_invoice, delete_draft_invoice,
     invoice_aging, issue_credit_note, post_invoice, record_customer_payment, refund_payment,
     replace_draft_invoice)
 from .stripe_payments import create_invoice_checkout
@@ -77,7 +77,13 @@ class CustomerSerializer(serializers.ModelSerializer):
         fields = ["id", "name", "email", "is_active"]
 
     def save(self, **kwargs):
-        return run_service(super().save, **kwargs)
+        created, request = self.instance is None, self.context.get("request")
+        with transaction.atomic():
+            customer = run_service(super().save, **kwargs)
+            audit("customer.created" if created else "customer.updated", customer, f"Customer {customer.name}",
+                  actor=request.user if request else None, name=customer.name, email=customer.email,
+                  is_active=customer.is_active)
+        return customer
 
 
 class InvoiceSerializer(serializers.ModelSerializer):
@@ -210,7 +216,7 @@ class InvoiceList(generics.ListCreateAPIView):
 
     def create(self, request, *args, **kwargs):
         data = validated(DraftInvoiceInput, request.data)
-        invoice = run_service(create_draft_invoice, **data)
+        invoice = run_service(create_draft_invoice, actor=request.user, **data)
         return Response(InvoiceDetailSerializer(invoice).data, status=status.HTTP_201_CREATED)
 
 
@@ -224,12 +230,12 @@ class InvoiceDetail(generics.RetrieveUpdateDestroyAPIView):
     queryset = InvoiceList.queryset
 
     def update(self, request, *args, **kwargs):
-        invoice = run_service(replace_draft_invoice, self.get_object(),
+        invoice = run_service(replace_draft_invoice, self.get_object(), actor=request.user,
                               **validated(DraftInvoiceInput, request.data))
         return Response(InvoiceDetailSerializer(invoice).data)
 
     def perform_destroy(self, instance):
-        run_service(delete_draft_invoice, instance)
+        run_service(delete_draft_invoice, instance, actor=self.request.user)
 
 
 class InvoiceAction(APIView):
@@ -314,7 +320,7 @@ class PaymentAllocationCreate(APIView):
         payment = get_object_or_404(CustomerPayment, pk=pk)
         data = validated(LaterAllocationInput, request.data)
         allocation, code = replay_aware(PaymentAllocation, {"reference": data["reference"]},
-                                        allocate_payment, payment, **data)
+                                        allocate_payment, payment, actor=request.user, **data)
         return Response(AllocationSerializer(allocation).data, status=code)
 
 

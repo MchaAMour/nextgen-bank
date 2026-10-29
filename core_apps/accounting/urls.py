@@ -5,6 +5,7 @@ from .ar_views import (AgingReport, CreditNoteList, CustomerDetail, CustomerList
     PaymentList, PaymentRefundCreate)
 from .bank_views import (AutoMatch, BankReconciliationReport, LineMatch, LinePost, StatementCsvImport,
     StatementDetail, StatementList)
+from .report_views import AuditEventList, BalanceSheet, CustomerStatement, ProfitAndLoss
 from .stripe_views import BalanceTransactionList, BalanceTransactionSync, StripeReconciliation, StripeWebhook
 from .views import AccountList, EntryList, EntryDetail, GeneralLedger, TrialBalance
 
@@ -35,6 +36,10 @@ urlpatterns = [
     path("bank-lines/<uuid:pk>/match/", LineMatch.as_view(), name="bank-line-match"),
     path("bank-lines/<uuid:pk>/post/", LinePost.as_view(), name="bank-line-post"),
     path("bank-reconciliation/", BankReconciliationReport.as_view(), name="bank-reconciliation"),
+    path("customers/<uuid:pk>/statement/", CustomerStatement.as_view(), name="customer-statement"),
+    path("balance-sheet/", BalanceSheet.as_view(), name="balance-sheet"),
+    path("profit-and-loss/", ProfitAndLoss.as_view(), name="profit-and-loss"),
+    path("audit-events/", AuditEventList.as_view(), name="audit-events"),
     path("accounts/", AccountList.as_view(), name="accounts"),
     path("entries/", EntryList.as_view(), name="entries"),
     path("entries/<uuid:pk>/", EntryDetail.as_view(), name="entry-detail"),

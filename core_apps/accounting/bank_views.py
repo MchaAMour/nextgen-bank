@@ -1,5 +1,3 @@
-from decimal import Decimal
-
 from django.shortcuts import get_object_or_404
 from rest_framework import generics, serializers, status
 from rest_framework.parsers import MultiPartParser
@@ -11,7 +9,7 @@ from .bank_reconciliation import (auto_match, bank_reconciliation, import_bank_s
     parse_statement_csv, post_statement_line, unmatch_line)
 from .models import BankStatement, BankStatementLine, JournalLine
 from .permissions import AccountingPermission
-from .views import LedgerPagination
+from .views import LedgerPagination, report_json
 
 READ = ["accounting.view_bankstatement", "accounting.view_bankstatementline", "accounting.view_bankmatch"]
 IMPORT = ["accounting.add_bankstatement", "accounting.add_bankstatementline", "accounting.add_bankmatch"]
@@ -158,7 +156,7 @@ class LineMatch(LineAction):
 
     def delete(self, request, pk):
         line = self.line(pk)
-        run_service(unmatch_line, line)
+        run_service(unmatch_line, line, actor=request.user)
         return self.respond(line)
 
 
@@ -174,16 +172,6 @@ class LinePost(LineAction):
         return self.respond(line, status.HTTP_201_CREATED)
 
 
-def _json(value):
-    if isinstance(value, Decimal):
-        return format(value, ".2f")
-    if isinstance(value, dict):
-        return {key: _json(item) for key, item in value.items()}
-    if isinstance(value, list):
-        return [_json(item) for item in value]
-    return value
-
-
 class BankReconciliationReport(APIView):
     permission_classes = [AccountingPermission]
     required_permissions = READ + ["accounting.view_journalline"]
@@ -192,4 +180,4 @@ class BankReconciliationReport(APIView):
         query = AgingQuery(data=request.query_params)
         query.is_valid(raise_exception=True)
         report = run_service(bank_reconciliation, as_of=query.validated_data["as_of"])
-        return Response(_json(report))
+        return Response(report_json(report))

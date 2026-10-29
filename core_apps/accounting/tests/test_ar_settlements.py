@@ -1,5 +1,6 @@
 from datetime import date
 from decimal import Decimal
+from unittest.mock import patch
 
 import pytest
 from django.core.exceptions import ValidationError
@@ -241,7 +242,7 @@ def delete_ar_rows_with_triggers_suspended():
         triggers = cursor.fetchall()
         for name, _ in triggers:
             cursor.execute(f"DROP TRIGGER {name}")
-        for table in ["paymentallocation", "paymentrefund", "creditnote", "customerpayment", "invoiceline",
+        for table in ["auditevent", "paymentallocation", "paymentrefund", "creditnote", "customerpayment", "invoiceline",
                       "invoice", "journalline", "journalentry", "customer"]:
             cursor.execute(f"DELETE FROM accounting_{table}")
         for _, sql in triggers:
@@ -261,9 +262,10 @@ def test_receipts_migrate_to_single_allocation_payments():
         apps.get_model("accounting", "InvoiceLine").objects.create(
             invoice=invoice, description="Work", quantity=1, unit_price=Decimal("100"))
         invoice = Invoice.objects.get(pk=invoice.pk)
-        post_invoice(invoice)
-        entry = _post_pair(debit_code="1000", credit_code="1100", amount=Decimal("40"), currency="EUR",
-            source_type="invoice", source_id=invoice.pk, entry_date=DAY, memo="Receipt R-OLD")
+        with patch("core_apps.accounting.services.audit"):  # The 0005 schema has no audit table.
+            post_invoice(invoice)
+            entry = _post_pair(debit_code="1000", credit_code="1100", amount=Decimal("40"), currency="EUR",
+                source_type="invoice", source_id=invoice.pk, entry_date=DAY, memo="Receipt R-OLD")
         apps.get_model("accounting", "InvoiceReceipt").objects.create(invoice_id=invoice.pk, reference="R-OLD",
             amount=Decimal("40"), received_on=DAY, journal_entry_id=entry.pk)
         executor = MigrationExecutor(connection)

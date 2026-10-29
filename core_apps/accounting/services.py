@@ -5,8 +5,16 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone
 
-from .models import (BASE_CURRENCY, ChartOfAccount, CreditNote, Customer, CustomerPayment, Invoice, InvoiceLine, JournalEntry,
-    JournalLine, PaymentAllocation, PaymentRefund)
+from .models import (BASE_CURRENCY, AuditEvent, ChartOfAccount, CreditNote, Customer, CustomerPayment, Invoice, InvoiceLine,
+    JournalEntry, JournalLine, PaymentAllocation, PaymentRefund)
+
+
+def audit(action, obj, summary, *, actor=None, **details):
+    """Record an audit event for `obj`; details must be JSON-serializable (amounts as strings)."""
+    if actor is not None and not getattr(actor, "is_authenticated", False):
+        actor = None
+    return AuditEvent.objects.create(action=action, object_type=obj._meta.model_name, object_id=str(obj.pk),
+                                     summary=summary, details=details, actor=actor)
 
 
 def _active_customer(customer):
@@ -32,18 +40,20 @@ def _add_invoice_lines(invoice, lines):
 
 
 @transaction.atomic
-def create_draft_invoice(*, customer, number, issue_date, due_date, lines, currency=BASE_CURRENCY):
+def create_draft_invoice(*, customer, number, issue_date, due_date, lines, currency=BASE_CURRENCY, actor=None):
     """Create a complete draft atomically, without recording revenue or AR yet."""
     customer = _active_customer(customer)
     lines = _required_lines(lines)
     invoice = Invoice.objects.create(customer=customer, number=number,
                                      issue_date=issue_date, due_date=due_date, currency=currency)
     _add_invoice_lines(invoice, lines)
+    audit("invoice.drafted", invoice, f"Draft invoice {number}", actor=actor, total=str(invoice.total))
     return invoice
 
 
 @transaction.atomic
-def replace_draft_invoice(invoice, *, customer, number, issue_date, due_date, lines, currency=BASE_CURRENCY):
+def replace_draft_invoice(invoice, *, customer, number, issue_date, due_date, lines, currency=BASE_CURRENCY,
+                          actor=None):
     """Replace a draft's header and lines under the posting lock, without ledger effect."""
     invoice = Invoice.objects.select_for_update().get(pk=invoice.pk)
     if invoice.status != "draft":
@@ -56,14 +66,16 @@ def replace_draft_invoice(invoice, *, customer, number, issue_date, due_date, li
     invoice.issue_date, invoice.due_date = issue_date, due_date
     invoice.save()
     _add_invoice_lines(invoice, lines)
+    audit("invoice.replaced", invoice, f"Draft invoice {number} replaced", actor=actor, total=str(invoice.total))
     return invoice
 
 
 @transaction.atomic
-def delete_draft_invoice(invoice):
+def delete_draft_invoice(invoice, *, actor=None):
     invoice = Invoice.objects.select_for_update().get(pk=invoice.pk)
     if invoice.status != "draft":
         raise ValidationError("Only draft invoices can be deleted.")
+    audit("invoice.deleted", invoice, f"Draft invoice {invoice.number} deleted", actor=actor)
     invoice.delete()
 
 User = get_user_model()
@@ -98,6 +110,11 @@ def post_journal_entry(entry: JournalEntry, *, posted_by: User | None = None) ->
         if posted_by is not None:
             locked_entry.posted_by = posted_by
         locked_entry.save(update_fields=["status", "posted_at", "posted_by", "updated_at"])
+        audit("journal_entry.posted", locked_entry, locked_entry.memo or "Journal entry posted", actor=posted_by,
+              entry_date=locked_entry.entry_date.isoformat(), total=str(total_debits),
+              source_type=locked_entry.source_type,
+              source_id=str(locked_entry.source_id) if locked_entry.source_id else "",
+              reversal_of=str(locked_entry.reversal_of_id) if locked_entry.reversal_of_id else "")
         return locked_entry
 
 
@@ -160,6 +177,7 @@ def post_invoice(invoice, *, actor=None):
     invoice.posted_total = total
     invoice.journal_entry = entry
     invoice.save()
+    audit("invoice.posted", invoice, f"Invoice {invoice.number} posted", actor=actor, total=str(total))
     return invoice
 
 
@@ -180,6 +198,8 @@ def cancel_invoice(invoice, *, cancellation_date, actor=None):
             actor=actor, reversal_of=invoice.journal_entry)
     # Deliberate lifecycle transition after validation under the parent row lock.
     invoice._apply_transition(status="cancelled", cancellation_entry=entry)
+    audit("invoice.cancelled", invoice, f"Invoice {invoice.number} cancelled", actor=actor,
+          cancellation_date=cancellation_date.isoformat())
     return invoice
 
 
@@ -215,14 +235,16 @@ def record_customer_payment(customer, *, amount, currency, reference, received_o
         source_type="customer_payment", source_id=payment.pk, entry_date=received_on,
         memo=f"Payment {reference}", actor=actor)
     payment.save()
+    audit("payment.recorded", payment, f"Payment {reference} recorded", actor=actor, amount=str(amount),
+          cash_account=cash_account)
     for allocation in allocations:
         allocate_payment(payment, invoice=allocation["invoice"], amount=allocation["amount"],
-                         reference=allocation["reference"], allocated_on=received_on)
+                         reference=allocation["reference"], allocated_on=received_on, actor=actor)
     return payment
 
 
 @transaction.atomic
-def allocate_payment(payment, *, invoice, amount, reference, allocated_on):
+def allocate_payment(payment, *, invoice, amount, reference, allocated_on, actor=None):
     """Apply unapplied payment credit to an open invoice. Locks payment, then invoice."""
     amount = _money(amount, "Allocation")
     payment = CustomerPayment.objects.select_for_update().get(pk=payment.pk)
@@ -241,8 +263,11 @@ def allocate_payment(payment, *, invoice, amount, reference, allocated_on):
         raise ValidationError("Allocation exceeds the open invoice balance.")
     if amount > payment.unapplied_amount:
         raise ValidationError("Allocation exceeds the unapplied payment amount.")
-    return PaymentAllocation.objects.create(payment=payment, invoice=invoice, reference=reference,
-                                            amount=amount, allocated_on=allocated_on)
+    allocation = PaymentAllocation.objects.create(payment=payment, invoice=invoice, reference=reference,
+                                                  amount=amount, allocated_on=allocated_on)
+    audit("payment.allocated", allocation, f"Payment {payment.reference} allocated to {invoice.number}",
+          actor=actor, amount=str(amount), payment=str(payment.pk), invoice=str(invoice.pk))
+    return allocation
 
 
 def receive_invoice_payment(invoice, *, amount, reference, received_on, actor=None):
@@ -273,6 +298,8 @@ def refund_payment(payment, *, amount, reference, refunded_on, actor=None, cash_
         currency=payment.currency, source_type="payment_refund", source_id=refund.pk,
         entry_date=refunded_on, memo=f"Refund {reference}", actor=actor)
     refund.save()
+    audit("payment.refunded", refund, f"Refund {reference} of payment {payment.reference}", actor=actor,
+          amount=str(amount), cash_account=cash_account)
     return refund
 
 
@@ -296,6 +323,7 @@ def issue_credit_note(invoice, *, number, amount, issued_on, reason, actor=None)
         currency=invoice.currency, source_type="credit_note", source_id=note.pk,
         entry_date=issued_on, memo=f"Credit note {number}", actor=actor)
     note.save()
+    audit("credit_note.issued", note, f"Credit note {number} for {invoice.number}", actor=actor, amount=str(amount))
     return note
 
 

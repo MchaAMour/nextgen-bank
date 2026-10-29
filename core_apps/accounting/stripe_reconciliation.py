@@ -23,8 +23,8 @@ from django.db import IntegrityError, transaction
 from django.db.models import Sum
 from django.utils import timezone
 
-from .models import BASE_CURRENCY, CustomerPayment, JournalLine, StripeBalanceTransaction
-from .services import post_lines, refund_payment
+from .models import BASE_CURRENCY, CustomerPayment, JournalEntry, JournalLine, StripeBalanceTransaction
+from .services import audit, post_lines, refund_payment
 from .stripe_payments import MINOR_UNITS, _from_timestamp, stripe_client
 
 CLEARING, CASH, FEES = "1010", "1000", "5100"
@@ -92,6 +92,9 @@ def apply_balance_transaction(record, *, actor=None):
             record.review_reason = "; ".join(error.messages) if isinstance(error, ValidationError) else str(error)
             record.payment = record.refund = record.journal_entry = None
         record.save()
+        if record.state in StripeBalanceTransaction.FINISHED:
+            audit(f"stripe_balance_transaction.{record.state}", record,
+                  f"Stripe {record.reporting_category} {record.stripe_id}", actor=actor, net=str(record.net))
         return record
 
 
@@ -161,7 +164,7 @@ def sync_balance_transactions(*, client=None, actor=None):
 
 
 def clearing_balance():
-    totals = JournalLine.objects.filter(account__code=CLEARING, entry__status="posted").aggregate(
+    totals = JournalLine.objects.filter(account__code=CLEARING, entry__status__in=JournalEntry.IN_LEDGER).aggregate(
         debit=Sum("debit"), credit=Sum("credit"))
     return _cents(totals["debit"]) - _cents(totals["credit"])
 

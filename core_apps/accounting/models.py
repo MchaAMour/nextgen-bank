@@ -450,6 +450,9 @@ class JournalEntry(TimeStampedModel):
         POSTED = "posted", _("Posted")
         REVERSED = "reversed", _("Reversed")
 
+    # Statuses whose lines count in balances; a reversal is offset by its correcting entry.
+    IN_LEDGER = [Status.POSTED, Status.REVERSED]
+
     entry_date = models.DateField(default=timezone.localdate)
     memo = models.CharField(max_length=500, blank=True)
     reference = models.CharField(max_length=100, blank=True)
@@ -637,3 +640,29 @@ class BankMatch(TimeStampedModel):
         if type(self).objects.filter(pk=self.pk).exists():
             raise ValidationError("Bank matches cannot be changed; unmatch and match again.")
         return super().save(*args, **kwargs)
+
+
+class AuditQuerySet(GuardedQuerySet):
+    label = "audit event"
+
+
+class AuditEvent(AppendOnlyRecord):
+    """Who changed what in the accounting records, written by the services in the same transaction.
+
+    Replays of idempotent requests change nothing and record nothing.
+    """
+
+    objects = AuditQuerySet.as_manager()
+
+    action = models.CharField(max_length=60)
+    object_type = models.CharField(max_length=60)
+    object_id = models.CharField(max_length=64)
+    summary = models.CharField(max_length=500)
+    details = models.JSONField(default=dict, blank=True)
+    # PROTECT: audit rows are never updated, so a user with history cannot be deleted (deactivate instead).
+    actor = models.ForeignKey(User, null=True, blank=True, on_delete=models.PROTECT, related_name="audit_events")
+
+    class Meta:
+        ordering = ["-created_at", "id"]
+        indexes = [models.Index(fields=["object_type", "object_id"], name="audit_event_object"),
+                   models.Index(fields=["created_at"], name="audit_event_created")]

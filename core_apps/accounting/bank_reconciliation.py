@@ -15,8 +15,9 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Q, Sum
 
-from .models import BASE_CURRENCY, BankMatch, BankStatement, BankStatementLine, ChartOfAccount, JournalLine
-from .services import post_lines
+from .models import (BASE_CURRENCY, BankMatch, BankStatement, BankStatementLine, ChartOfAccount, JournalEntry,
+    JournalLine)
+from .services import audit, post_lines
 
 BANK_ACCOUNTS = {"1000"}
 # Posting a bank-only item to these would bypass their subledgers or the Stripe sync.
@@ -114,6 +115,8 @@ def import_bank_statement(*, reference, start_date, end_date, opening_balance, c
         closing_balance=closing, currency=BASE_CURRENCY, imported_by=actor)
     for sequence, line in enumerate(lines, start=1):
         BankStatementLine.objects.create(statement=statement, sequence=sequence, **line)
+    audit("bank_statement.imported", statement, f"Bank statement {reference} imported", actor=actor,
+          lines=len(lines), opening_balance=str(opening), closing_balance=str(closing))
     auto_match(statement=statement, actor=actor)
     return statement
 
@@ -157,10 +160,16 @@ def auto_match(*, statement=None, actor=None):
         if candidate is None:
             counts["unmatched"] += 1
             continue
-        BankMatch.objects.create(statement_line=line, journal_line=candidate, method=BankMatch.Method.AUTOMATIC,
-                                 matched_by=actor)
+        _match(line, candidate, BankMatch.Method.AUTOMATIC, actor)
         counts["matched"] += 1
     return counts
+
+
+def _match(line, journal_line, method, actor):
+    match = BankMatch.objects.create(statement_line=line, journal_line=journal_line, method=method, matched_by=actor)
+    audit("bank_line.matched", line, f"Bank line {line.statement.reference}/{line.sequence} matched", actor=actor,
+          method=method, journal_line=str(journal_line.pk), entry=str(journal_line.entry_id), amount=str(line.amount))
+    return match
 
 
 def _unmatched_line(line):
@@ -181,15 +190,18 @@ def match_line(line, *, journal_line, actor=None):
         raise ValidationError("The ledger line must move the bank account by the statement line's amount.")
     if BankMatch.objects.filter(journal_line=journal_line).exists():
         raise ValidationError("This ledger line is already matched.")
-    return BankMatch.objects.create(statement_line=line, journal_line=journal_line, method=BankMatch.Method.MANUAL,
-                                    matched_by=actor)
+    return _match(line, journal_line, BankMatch.Method.MANUAL, actor)
 
 
 @transaction.atomic
-def unmatch_line(line):
-    match = BankMatch.objects.select_for_update().filter(statement_line=line).first()
+def unmatch_line(line, *, actor=None):
+    match = BankMatch.objects.select_for_update().select_related("statement_line__statement").filter(
+        statement_line=line).first()
     if match is None:
         raise ValidationError("This statement line is not matched.")
+    line = match.statement_line
+    audit("bank_line.unmatched", line, f"Bank line {line.statement.reference}/{line.sequence} unmatched",
+          actor=actor, method=match.method, journal_line=str(match.journal_line_id))
     match.delete()
 
 
@@ -205,8 +217,7 @@ def post_statement_line(line, *, account_code, memo, actor=None):
              else [(account_code, amount, ZERO), (bank, ZERO, amount)])
     entry = post_lines(lines, currency=line.statement.currency, source_type="bank_statement_line",
                        source_id=line.pk, entry_date=line.booked_on, memo=memo or line.description, actor=actor)
-    return BankMatch.objects.create(statement_line=line, journal_line=entry.lines.get(account__code=bank),
-                                    method=BankMatch.Method.POSTED, matched_by=actor)
+    return _match(line, entry.lines.get(account__code=bank), BankMatch.Method.POSTED, actor)
 
 
 def _ledger_sum(lines):
@@ -228,7 +239,7 @@ def bank_reconciliation(*, as_of, account_code="1000"):
     covered_to = min(as_of, statements.order_by("-end_date").first().end_date)
     bank_lines = BankStatementLine.objects.filter(statement__account__code=account_code, booked_on__lte=as_of)
     bank_balance = first.opening_balance + _cents(bank_lines.aggregate(total=Sum("amount"))["total"])
-    ledger = JournalLine.objects.filter(account__code=account_code, entry__status="posted")
+    ledger = JournalLine.objects.filter(account__code=account_code, entry__status__in=JournalEntry.IN_LEDGER)
     ledger_balance = _ledger_sum(ledger.filter(entry__entry_date__lte=as_of))
     opening_difference = first.opening_balance - _ledger_sum(ledger.filter(entry__entry_date__lt=first.start_date))
 

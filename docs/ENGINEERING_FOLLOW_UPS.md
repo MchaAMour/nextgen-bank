@@ -98,6 +98,15 @@ regression test or documented verification; record the evidence here.
   rejection by the triggers, and the APIs. 0010 reversed and reapplied on
   SQLite and PostgreSQL 16; one-off PostgreSQL run: 235 accounting tests passed.
 
+- Reports and audit (migration `0011_audit_events`): 8 tests in
+  `test_financial_reports.py` cover a January scenario with invoices, a
+  cancellation, a payment with customer credit, a refund, a credit note and bank
+  charges: the balance sheet balances on two dates, profit and loss equals
+  current earnings, customer statements match the AR ledger with running and
+  opening balances, audit events are written once per change with the API user
+  and reject raw updates and deletes. One-off PostgreSQL 16 run: 243 accounting
+  tests passed; 0011 reversed and reapplied.
+
 ## Scope checkpoints
 
 - Ledger reporting is read-only; do not describe the ledger as production-ready.
@@ -107,9 +116,9 @@ regression test or documented verification; record the evidence here.
 
 ## Latest verification
 
-Bank reconciliation stage (Goal 6, step 3): `make test` ran 236 SQLite
-tests, all passed; `makemigrations --check` found no changes. A one-off
-PostgreSQL 16 run passed all 235 accounting tests.
+Reports and audit stage (Goal 6, step 4): `make test` ran 244 SQLite tests,
+all passed; `make check` reported no issues; `makemigrations --check` found no
+changes. A one-off PostgreSQL 16 run passed all 243 accounting tests.
 One live test-mode Checkout payment succeeded end to end (STRIPE-04); the
 balance sync has not run against Stripe yet (waiting for the dedicated
 sandbox). PG-01 (a PostgreSQL test job)

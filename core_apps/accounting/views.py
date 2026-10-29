@@ -63,7 +63,7 @@ def report_lines(params):
     data = serializer.validated_data
     # Reversals remain part of ledger history; their correcting entries offset them.
     lines = JournalLine.objects.filter(
-        entry__status__in=[JournalEntry.Status.POSTED, JournalEntry.Status.REVERSED]
+        entry__status__in=JournalEntry.IN_LEDGER
     )
     for key, lookup in {
         "start_date": "entry__entry_date__gte",
@@ -94,6 +94,17 @@ class GeneralLedger(generics.ListAPIView):
 
 def money(amount):
     return format(amount, ".2f")
+
+
+def report_json(value):
+    """Report dicts and lists with Decimal amounts as two-decimal strings."""
+    if isinstance(value, Decimal):
+        return money(value)
+    if isinstance(value, dict):
+        return {key: report_json(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [report_json(item) for item in value]
+    return value
 
 
 class TrialBalance(APIView):

@@ -194,7 +194,8 @@ tests.
   done: import, matching and reconciliation for 1000
   ([Bank reconciliation](BANK_RECONCILIATION.md)).*
 - Add balance sheet, profit and loss, customer/supplier statements, and audit
-  history.
+  history. *Done except supplier statements, which need AP (Goal 5)
+  ([Financial reports](FINANCIAL_REPORTS.md)).*
 
 **Commit:** `feat: add reconciliation and financial reports`
 
