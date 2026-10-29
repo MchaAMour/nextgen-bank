@@ -78,6 +78,9 @@ class Customer(TimeStampedModel):
         self.full_clean()
         return super().save(*args, **kwargs)
 
+    def __str__(self):
+        return self.name
+
 
 class Invoice(TimeStampedModel):
     """Lifecycle changes go through services; database triggers reject other writes."""
@@ -155,6 +158,9 @@ class Invoice(TimeStampedModel):
             raise ValidationError("Posted invoices cannot be deleted.")
         return super().delete(*args, **kwargs)
 
+    def __str__(self):
+        return f"Invoice {self.number}"
+
 
 def _lock_draft_invoices(*invoice_ids, message):
     """Share the posting service's parent row lock before changing draft lines."""
@@ -196,6 +202,9 @@ class InvoiceLine(TimeStampedModel):
     @property
     def total(self):
         return (self.quantity * self.unit_price).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+    def __str__(self):
+        return self.description
 
 
 class AppendOnlyRecord(TimeStampedModel):
@@ -241,6 +250,9 @@ class CustomerPayment(AppendOnlyRecord):
         return (self.amount - _stored_total(self, "allocated_total", "allocations", **ACTIVE_ALLOCATIONS)
                 - _stored_total(self, "refunded_total", "refunds"))
 
+    def __str__(self):
+        return f"Payment {self.reference}"
+
 
 class PaymentAllocation(AppendOnlyRecord):
     """Applies part of a payment to an invoice. No ledger effect: the payment already credited AR."""
@@ -253,6 +265,9 @@ class PaymentAllocation(AppendOnlyRecord):
 
     class Meta:
         constraints = [models.CheckConstraint(check=models.Q(amount__gt=0), name="payment_allocation_positive")]
+
+    def __str__(self):
+        return f"Allocation {self.reference}"
 
 
 class AllocationRelease(AppendOnlyRecord):
@@ -268,6 +283,9 @@ class AllocationRelease(AppendOnlyRecord):
     released_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.PROTECT,
                                     related_name="allocation_releases")
 
+    def __str__(self):
+        return f"Release of {self.allocation_id}"
+
 
 class PaymentRefund(AppendOnlyRecord):
     """Returns unapplied customer credit: debit AR, credit cash."""
@@ -280,6 +298,9 @@ class PaymentRefund(AppendOnlyRecord):
 
     class Meta:
         constraints = [models.CheckConstraint(check=models.Q(amount__gt=0), name="payment_refund_positive")]
+
+    def __str__(self):
+        return f"Refund {self.reference}"
 
 
 class CreditNote(AppendOnlyRecord):
@@ -294,6 +315,9 @@ class CreditNote(AppendOnlyRecord):
 
     class Meta:
         constraints = [models.CheckConstraint(check=models.Q(amount__gt=0), name="credit_note_positive")]
+
+    def __str__(self):
+        return f"Credit note {self.number}"
 
 
 class StripeCheckoutSession(TimeStampedModel):
@@ -334,6 +358,9 @@ class StripeCheckoutSession(TimeStampedModel):
                                    name="stripe_session_paid_has_payment"),
         ]
 
+    def __str__(self):
+        return self.stripe_session_id
+
 
 class StripeWebhookEvent(TimeStampedModel):
     """Each verified Stripe event is stored once; replays of a finished event change nothing."""
@@ -354,6 +381,9 @@ class StripeWebhookEvent(TimeStampedModel):
     error = models.TextField(blank=True)
     attempts = models.PositiveIntegerField(default=0)
     processed_at = models.DateTimeField(null=True, blank=True)
+
+    def __str__(self):
+        return f"{self.event_type} {self.event_id}"
 
 
 class StripeBalanceTransaction(TimeStampedModel):
@@ -403,6 +433,9 @@ class StripeBalanceTransaction(TimeStampedModel):
                                    | models.Q(journal_entry__isnull=True, refund__isnull=True),
                                    name="stripe_balance_only_posted_has_entry"),
         ]
+
+    def __str__(self):
+        return f"{self.reporting_category} {self.stripe_id}"
 
 
 class JournalQuerySet(GuardedQuerySet):
@@ -607,6 +640,9 @@ class JournalLine(TimeStampedModel):
             raise ValidationError("Lines belonging to posted entries cannot be deleted.")
         super().delete(*args, **kwargs)
 
+    def __str__(self):
+        return f"{self.account.code} Dr {self.debit} Cr {self.credit}"
+
 
 class BankQuerySet(GuardedQuerySet):
     label = "bank statement"
@@ -636,6 +672,9 @@ class BankStatement(AppendOnlyRecord):
                                    name="bank_statement_currency_supported"),
         ]
 
+    def __str__(self):
+        return f"Statement {self.reference}"
+
 
 class BankStatementLine(AppendOnlyRecord):
     """One bank movement: positive amounts are money in, negative money out."""
@@ -655,6 +694,9 @@ class BankStatementLine(AppendOnlyRecord):
             models.UniqueConstraint(fields=["statement", "sequence"], name="bank_line_sequence_unique"),
             models.CheckConstraint(check=~models.Q(amount=0), name="bank_line_amount_nonzero"),
         ]
+
+    def __str__(self):
+        return f"{self.booked_on} {self.amount} {self.description}"
 
 
 class BankMatch(TimeStampedModel):
@@ -678,6 +720,9 @@ class BankMatch(TimeStampedModel):
         if type(self).objects.filter(pk=self.pk).exists():
             raise ValidationError("Bank matches cannot be changed; unmatch and match again.")
         return super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"Match of {self.statement_line_id}"
 
 
 class AuditQuerySet(GuardedQuerySet):
@@ -705,6 +750,9 @@ class AuditEvent(AppendOnlyRecord):
         indexes = [models.Index(fields=["object_type", "object_id"], name="audit_event_object"),
                    models.Index(fields=["created_at"], name="audit_event_created")]
 
+    def __str__(self):
+        return f"{self.action} {self.object_type} {self.object_id}"
+
 
 class APQuerySet(GuardedQuerySet):
     label = "AP document"
@@ -728,6 +776,9 @@ class Supplier(TimeStampedModel):
     def save(self, *args, **kwargs):
         self.full_clean()
         return super().save(*args, **kwargs)
+
+    def __str__(self):
+        return self.name
 
 
 class Bill(TimeStampedModel):
@@ -821,6 +872,9 @@ class Bill(TimeStampedModel):
             raise ValidationError("Only draft bills can be deleted.")
         return super().delete(*args, **kwargs)
 
+    def __str__(self):
+        return f"Bill {self.number}"
+
 
 class BillLine(TimeStampedModel):
     objects = APQuerySet.as_manager()
@@ -859,6 +913,9 @@ class BillLine(TimeStampedModel):
     def total(self):
         return (self.quantity * self.unit_price).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
+    def __str__(self):
+        return self.description
+
 
 class SupplierPayment(AppendOnlyRecord):
     """Money paid to a supplier: debit AP, credit cash. Allocations apply it to bills; the rest is a prepayment."""
@@ -883,6 +940,9 @@ class SupplierPayment(AppendOnlyRecord):
     def unapplied_amount(self):
         return self.amount - _stored_total(self, "allocated_total", "allocations")
 
+    def __str__(self):
+        return f"Supplier payment {self.reference}"
+
 
 class SupplierPaymentAllocation(AppendOnlyRecord):
     """Applies part of a supplier payment to a posted bill. No ledger effect."""
@@ -897,6 +957,9 @@ class SupplierPaymentAllocation(AppendOnlyRecord):
 
     class Meta:
         constraints = [models.CheckConstraint(check=models.Q(amount__gt=0), name="supplier_allocation_positive")]
+
+    def __str__(self):
+        return f"Allocation {self.reference}"
 
 
 class PeriodClose(AppendOnlyRecord):
@@ -916,3 +979,6 @@ class PeriodClose(AppendOnlyRecord):
 
     class Meta:
         ordering = ["-closed_through"]
+
+    def __str__(self):
+        return f"Closed through {self.closed_through}"

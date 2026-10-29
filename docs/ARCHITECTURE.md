@@ -88,6 +88,8 @@ flowchart TB
   services.
 - **Database triggers** reject anything the services would reject, so raw SQL
   cannot unbalance the books either.
+- **Admin** (`admin.py`) is a read-only back office: every model can be browsed
+  with the `view_*` permission, but nothing can be added, changed or deleted.
 
 ## Data model
 

@@ -87,6 +87,21 @@ The demo already contains invoice **DEMO-1** (120.00 EUR), paid through Stripe.
 In the trial balance, Stripe Clearing (1010) shows 115.97 after Stripe's 4.03
 fee. Point out that every number comes from journal entries; none is stored.
 
+### Or browse it in the admin
+
+The admin at https://next-gen-bank.srv1915831.hstgr.cloud/supersecret/ (log in
+with your superuser; no one-time code needed) has a read-only **Accounting**
+section, the easiest way to look around:
+- invoices with their lines, allocations and credit notes inline;
+- journal entries with their debit and credit lines;
+- payments, Stripe sessions and webhook events, bank statements, bills;
+- the audit trail.
+
+Every list can be searched and filtered. Nothing can be added, changed or
+deleted there, because all writes go through the API so they are validated
+and audited. Keep a tab open on it during the walkthrough to watch each step
+appear.
+
 ## 3. Invoice a customer
 
 1. **Create the customer:** `POST customers/`
