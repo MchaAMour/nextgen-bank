@@ -1,6 +1,7 @@
 from pathlib import Path
 from dotenv import load_dotenv
 from os import W_OK, access, getenv, path
+from celery.schedules import crontab
 from loguru import logger
 from datetime import timedelta, date
 
@@ -227,11 +228,15 @@ CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
 CELERY_WORKER_SEND_TASK_EVENTS = True
 
 CELERY_BEAT_SCHEDULE = {
+    # Once a day, at midnight UTC: the task adds a full day's interest each time it runs.
     "apply-daily-interest": {
-        "task": "apply_daily_interest",
+        "task": "core_apps.accounts.tasks.apply_daily_interest",
+        "schedule": crontab(minute=0, hour=0),
     },
+    # Hourly, looking back TIME_WINDOW_HOURS (default 1), so each window is checked once.
     "detect-suspicious-activities": {
-        "task": "detect_suspicious_activities",
+        "task": "core_apps.accounts.tasks.detect_suspicious_activities",
+        "schedule": crontab(minute=5),
     },
 }
 

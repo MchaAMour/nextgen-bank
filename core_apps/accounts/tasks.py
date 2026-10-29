@@ -162,11 +162,12 @@ def apply_daily_interest():
 
 @shared_task
 def detect_suspicious_activities():
-    LARGE_TRANSACTION_THRESHOLD = Decimal(getenv("LARGE_TRANSACTION_THRESHOLD"))
+    LARGE_TRANSACTION_THRESHOLD = Decimal(getenv("LARGE_TRANSACTION_THRESHOLD", "10000"))
 
-    FREQUENT_TRANSACTION_THRESHOLD = int(getenv("FREQUENT_TRANSACTION_THRESHOLD"))
+    FREQUENT_TRANSACTION_THRESHOLD = int(getenv("FREQUENT_TRANSACTION_THRESHOLD", "10"))
 
-    TIME_WINDOW_HOURS = int(getenv("TIME_WINDOW_HOURS"))
+    # Matches the hourly schedule in CELERY_BEAT_SCHEDULE.
+    TIME_WINDOW_HOURS = int(getenv("TIME_WINDOW_HOURS", "1"))
 
     TIME_WINDOW = timedelta(hours=TIME_WINDOW_HOURS)
 
@@ -177,7 +178,7 @@ def detect_suspicious_activities():
     suspicious_activities = []
 
     large_transactions = Transaction.objects.filter(
-        amount__gte=LARGE_TRANSACTION_THRESHOLD, created_at__lte=time_threshold
+        amount__gte=LARGE_TRANSACTION_THRESHOLD, created_at__gte=time_threshold
     )
 
     for transaction in large_transactions:
@@ -215,16 +216,16 @@ def detect_suspicious_activities():
                 f"Large balance change detected: {total_change} by user {account.account_number}"
             )
 
-        if suspicious_activities:
-            num_activities = send_suspicious_activity_alert(suspicious_activities)
-            if num_activities > 0:
-                return (
-                    f"Suspicious activity check completed. {num_activities} suspicious "
-                    f"activities detected and reported "
-                )
-            else:
-                return (
-                    f"Suspicious activity check completed. Activities "
-                    f"detected but alert email failed to send "
-                )
+    if suspicious_activities:
+        num_activities = send_suspicious_activity_alert(suspicious_activities)
+        if num_activities > 0:
+            return (
+                f"Suspicious activity check completed. {num_activities} suspicious "
+                f"activities detected and reported "
+            )
+        else:
+            return (
+                f"Suspicious activity check completed. Activities "
+                f"detected but alert email failed to send "
+            )
     return "Suspicious activity check completed. No suspicious activities detected"
