@@ -11,8 +11,10 @@ BASE_DIR = Path(__file__).resolve(strict=True).parent.parent.parent
 APPS_DIR = BASE_DIR / "core_apps"
 
 local_env_file = path.join(BASE_DIR, ".envs", ".env.production")
+# Test settings must never pick up deployment values (CFG-01).
+TESTING = getenv("DJANGO_SETTINGS_MODULE", "").startswith("config.settings.test")
 
-if path.isfile(local_env_file):
+if path.isfile(local_env_file) and not TESTING:
     load_dotenv(local_env_file)
 
 # Application definition

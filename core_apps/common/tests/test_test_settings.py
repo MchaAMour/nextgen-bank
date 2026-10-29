@@ -17,3 +17,14 @@ def test_automated_tests_use_safe_local_configuration():
     assert settings.STRIPE_SECRET_KEY == ""
     assert settings.STRIPE_WEBHOOK_SECRET == ""
     assert settings.ACCOUNTING_BASE_CURRENCY == "EUR"
+
+
+def test_tests_cannot_reach_the_network():
+    import socket
+
+    with socket.socket() as sock, pytest.raises(RuntimeError, match="network connections"):
+        sock.connect(("93.184.215.14", 443))
+
+
+def test_deployment_dotenv_is_not_loaded_in_tests():
+    assert settings.TESTING is True

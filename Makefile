@@ -41,6 +41,14 @@ test-postgres:
 	docker compose -f docker/test-postgres.yml run --rm --build tests; \
 	status=$$?; docker compose -f docker/test-postgres.yml down -v; exit $$status
 
+lock-requirements:
+	@docker compose -f docker/test.yml build tests >&2
+	@{ echo "# Every installed package, transitive ones included, pinned to the versions the test suite ran with (CFG-02)."; \
+	  echo "# Regenerate after changing base.txt or local.txt: make lock-requirements"; \
+	  docker compose -f docker/test.yml run --rm -T tests python -m pip list --format=freeze 2>/dev/null \
+	  | grep -v "^pip==\|^setuptools==\|^wheel==" | sort -f; } > requirements/constraints.txt.new \
+	  && mv requirements/constraints.txt.new requirements/constraints.txt
+
 check:
 	docker compose -f docker/test.yml run --rm --build tests python manage.py check
 

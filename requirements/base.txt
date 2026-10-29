@@ -1,3 +1,4 @@
+-c constraints.txt
 django==4.2.15
 python-dotenv==1.0.1
 djangorestframework==3.15.2
