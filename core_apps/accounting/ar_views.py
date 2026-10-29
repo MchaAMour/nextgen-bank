@@ -1,7 +1,7 @@
 import logging
 
 import stripe
-from django.core.exceptions import ValidationError as DjangoValidationError
+from django.core.exceptions import ImproperlyConfigured, ValidationError as DjangoValidationError
 from django.db import IntegrityError, transaction
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -17,6 +17,7 @@ from .services import (allocate_payment, audit, cancel_invoice, create_draft_inv
     invoice_aging, issue_credit_note, post_invoice, record_customer_payment, refund_payment,
     release_allocation, replace_draft_invoice)
 from .stripe_payments import create_invoice_checkout
+from .stripe_views import StripeNotConfigured
 from .views import LedgerPagination
 
 logger = logging.getLogger(__name__)
@@ -291,6 +292,9 @@ class InvoiceCheckout(InvoiceAction):
     def post(self, request, pk):
         try:
             session = run_service(create_invoice_checkout, self.invoice(pk), actor=request.user)
+        except ImproperlyConfigured:
+            logger.exception("Stripe is not configured for checkout")
+            raise StripeNotConfigured()
         except stripe.StripeError:
             logger.exception("Stripe Checkout Session creation failed")
             raise StripeUnavailable()

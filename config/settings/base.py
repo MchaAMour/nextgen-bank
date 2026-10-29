@@ -255,6 +255,8 @@ COOKIE_SECURE = getenv("COOKIE_SECURE", "True") == "True"
 STRIPE_SECRET_KEY = getenv("STRIPE_SECRET_KEY", "")
 STRIPE_PUBLISHABLE_KEY = getenv("STRIPE_PUBLISHABLE_KEY", "")
 STRIPE_WEBHOOK_SECRET = getenv("STRIPE_WEBHOOK_SECRET", "")
+# The one Stripe account (acct_...) this ledger reconciles; Stripe calls refuse a key for any other.
+STRIPE_ACCOUNT_ID = getenv("STRIPE_ACCOUNT_ID", "")
 # Where Stripe Checkout returns the customer. Display only: payments are
 # recorded from signed webhooks, never from these pages.
 STRIPE_CHECKOUT_SUCCESS_URL = getenv(

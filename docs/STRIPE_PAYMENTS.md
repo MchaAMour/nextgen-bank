@@ -54,10 +54,16 @@ signatures return 400 and store nothing; a missing signing secret returns 503.
 ## Configuration
 
 Settings come from environment variables (never the database):
-`STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_CHECKOUT_SUCCESS_URL`
-and `STRIPE_CHECKOUT_CANCEL_URL`. Locally, `local.yml` loads
-`../.env-stripe` and then `../.env-stripe-listen` from the directory above the
-repository, so neither file can be committed.
+`STRIPE_SECRET_KEY`, `STRIPE_ACCOUNT_ID`, `STRIPE_WEBHOOK_SECRET`,
+`STRIPE_CHECKOUT_SUCCESS_URL` and `STRIPE_CHECKOUT_CANCEL_URL`. Locally,
+`local.yml` loads `../.env-stripe` and then `../.env-stripe-listen` from the
+directory above the repository, so neither file can be committed.
+
+`STRIPE_ACCOUNT_ID` (`acct_...`) names the one Stripe account this ledger
+reconciles. Before its first Stripe call, each process checks that the key
+belongs to that account and refuses it otherwise (the API answers 503). After
+changing keys, recreate every container that loads them (api, celeryworker,
+flower).
 
 ### Local webhooks
 

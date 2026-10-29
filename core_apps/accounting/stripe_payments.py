@@ -24,12 +24,29 @@ MINOR_UNITS = Decimal("100")  # EUR has two decimal places.
 REUSE_MARGIN = timedelta(minutes=10)
 PAID_STATUSES = {"paid", "no_payment_required"}
 FULFILLING_EVENTS = {"checkout.session.completed", "checkout.session.async_payment_succeeded"}
+# (key, account) pairs already checked in this process.
+_verified_accounts = set()
 
 
 def stripe_client():
-    if not settings.STRIPE_SECRET_KEY:
+    """A client for STRIPE_SECRET_KEY, once its key is confirmed to belong to STRIPE_ACCOUNT_ID.
+
+    The ledger reconciles one Stripe account; a key for any other account (a stale
+    container after a key change, say) would sync that account's transactions into it.
+    """
+    key, expected = settings.STRIPE_SECRET_KEY, settings.STRIPE_ACCOUNT_ID
+    if not key:
         raise ImproperlyConfigured("STRIPE_SECRET_KEY is not configured.")
-    return stripe.StripeClient(settings.STRIPE_SECRET_KEY)
+    if not expected:
+        raise ImproperlyConfigured("STRIPE_ACCOUNT_ID is not configured; set it to the account this ledger uses.")
+    client = stripe.StripeClient(key)
+    if (key, expected) not in _verified_accounts:
+        actual = client.v1.accounts.retrieve_current().id
+        if actual != expected:
+            raise ImproperlyConfigured(f"STRIPE_SECRET_KEY belongs to Stripe account {actual}, "
+                                       f"not STRIPE_ACCOUNT_ID {expected}.")
+        _verified_accounts.add((key, expected))
+    return client
 
 
 def _from_timestamp(value):
