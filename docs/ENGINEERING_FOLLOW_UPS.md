@@ -23,9 +23,9 @@ regression test or documented verification; record the evidence here.
 | STRIPE-04 | Medium / closed | End-to-end test-mode payment verified on 2026-10-28 (evidence under Completed safeguards). |
 | AR-01 | High / closed | Goal 3 scope delivered: drafts, posting, cancellation, reusable payments with multiple partial allocations, refunds, credit notes, historical aging reconciled to the AR ledger, database enforcement and protected APIs. Remaining AR items are tracked in AR-02, AR-04 and AR-05. |
 | AR-06 | Medium / closed | Invoice and payment lists annotate balances with correlated subqueries (`with_balances()`). `test_invoice_list_balances_use_constant_queries` caps a five-invoice list at 8 queries. |
-| AR-02 | Medium / partly addressed | Draft creation now re-reads and locks the customer. PostgreSQL concurrent deactivation tests remain; SQLite tests only verify persisted inactive customers are rejected. |
+| AR-02 | Medium / closed | Draft creation re-reads and locks the customer. PostgreSQL two-connection test: a draft started during an uncommitted deactivation waits for it (about 1 s) and is then rejected. |
 | AR-03 | High / closed | Closed by migration 0005: lifecycle check constraints, SQLite/PostgreSQL triggers for invoices, lines and receipts, rejected bulk AR writes, and parent-locked draft line writes. Evidence under Completed safeguards. Journal-line equivalents remain INT-01/INT-02. |
-| AR-04 | Medium / partly addressed | Payment, allocation and refund references and credit-note numbers are unique; identical sequential retries return the original record. The APIs map IntegrityError from concurrent reuse to 409 for client retry (mocked test). A PostgreSQL concurrent-reuse test remains. |
+| AR-04 | Medium / closed | References and credit-note numbers are unique and identical retries replay. PostgreSQL two-connection test: two payments reusing one reference concurrently commit exactly one payment and one journal entry; the other request gets IntegrityError (409 in the API) or a mismatch error. |
 | AR-05 | Medium / open | Tax (MONEY-01) and period closing remain. Invoices with allocations or credit notes cannot be cancelled, and allocations cannot be released, so a paid invoice cannot be corrected and refunded yet. Refunds, credit notes and payment-to-many-invoice allocations are done. |
 
 ## Completed safeguards

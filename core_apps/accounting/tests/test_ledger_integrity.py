@@ -258,3 +258,76 @@ def test_concurrent_allocations_cannot_overpay(starter_chart, invoice):
         thread.join()
     assert sorted(results) == ["ok", "rejected"]
     assert Invoice.objects.with_balances().get(pk=posted.pk).open_balance == Decimal("40")
+
+
+@postgres_only
+@pytest.mark.django_db(transaction=True)
+def test_draft_waits_for_a_concurrent_deactivation_and_is_rejected(starter_chart):
+    """AR-02: creating a draft re-reads the customer under a row lock, so it sees a committed deactivation."""
+    from core_apps.accounting.models import Customer
+    from core_apps.accounting.services import create_draft_invoice
+
+    customer = Customer.objects.create(name="Leaving")
+    deactivating, outcome = threading.Event(), {}
+
+    def deactivate():
+        with transaction.atomic():
+            locked = Customer.objects.select_for_update().get(pk=customer.pk)
+            locked.is_active = False
+            locked.save()
+            deactivating.set()
+            time.sleep(1.0)
+        connections.close_all()
+
+    def draft_invoice():
+        deactivating.wait()
+        started = time.monotonic()
+        try:
+            create_draft_invoice(customer=customer, number="RACE-INV", issue_date=DAY, due_date=DAY,
+                                 lines=[dict(description="Work", quantity="1", unit_price="10")])
+            outcome["error"] = None
+        except ValidationError as error:
+            outcome["error"] = error
+        outcome["waited"] = time.monotonic() - started
+        connections.close_all()
+
+    threads = [threading.Thread(target=deactivate), threading.Thread(target=draft_invoice)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert "inactive customer" in str(outcome["error"]) and outcome["waited"] >= 0.8
+    assert not Invoice.objects.filter(number="RACE-INV").exists()
+
+
+@postgres_only
+@pytest.mark.django_db(transaction=True)
+def test_concurrent_reuse_of_a_payment_reference_creates_one_payment(starter_chart, invoice):
+    """AR-04: both requests pass the replay check; the unique reference lets one commit, the other rolls back."""
+    from core_apps.accounting.models import CustomerPayment
+    from core_apps.accounting.services import record_customer_payment
+
+    barrier, results = threading.Barrier(2), []
+
+    def pay(amount):
+        barrier.wait()
+        try:
+            record_customer_payment(invoice.customer, amount=amount, currency="EUR", reference="SAME-REF",
+                                    received_on=DAY)
+            results.append("ok")
+        except IntegrityError:
+            results.append("conflict")  # The API answers 409; the client retries and gets the replay.
+        except ValidationError:
+            results.append("replay mismatch")  # The other request committed first.
+        finally:
+            connections.close_all()
+
+    threads = [threading.Thread(target=pay, args=(amount,)) for amount in ("10", "20")]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert results.count("ok") == 1 and len(results) == 2
+    payment = CustomerPayment.objects.get(reference="SAME-REF")
+    assert JournalEntry.objects.filter(source_type="customer_payment").count() == 1
+    assert payment.journal_entry.status == "posted"
