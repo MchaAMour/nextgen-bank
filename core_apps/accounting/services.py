@@ -5,7 +5,7 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone
 
-from .models import (BASE_CURRENCY, AuditEvent, ChartOfAccount, CreditNote, Customer, CustomerPayment, Invoice, InvoiceLine,
+from .models import (BASE_CURRENCY, ACTIVE_ALLOCATIONS, AllocationRelease, AuditEvent, ChartOfAccount, CreditNote, Customer, CustomerPayment, Invoice, InvoiceLine,
     JournalEntry, JournalLine, PaymentAllocation, PaymentRefund, PeriodClose)
 
 
@@ -222,7 +222,7 @@ def cancel_invoice(invoice, *, cancellation_date, actor=None):
         raise ValidationError("Invoice is already cancelled.")
     if cancellation_date < invoice.issue_date:
         raise ValidationError("Cancellation cannot precede the invoice date.")
-    if invoice.allocations.exists() or invoice.credit_notes.exists():
+    if invoice.allocations.filter(**ACTIVE_ALLOCATIONS).exists() or invoice.credit_notes.exists():
         raise ValidationError("Invoices with allocated payments or credit notes cannot be cancelled; "
                               "issue a credit note for the open balance instead.")
     entry = None
@@ -303,6 +303,36 @@ def allocate_payment(payment, *, invoice, amount, reference, allocated_on, actor
     return allocation
 
 
+@transaction.atomic
+def release_allocation(allocation, *, released_on, reason, actor=None):
+    """Take an allocation back in full; the invoice is open and the payment unapplied again. No ledger entry.
+
+    An identical retry returns the original release.
+    """
+    allocation = PaymentAllocation.objects.get(pk=allocation.pk)
+    # Lock order matches allocate_payment: payment, then invoice.
+    payment = CustomerPayment.objects.select_for_update().get(pk=allocation.payment_id)
+    invoice = Invoice.objects.select_for_update().get(pk=allocation.invoice_id)
+    existing = AllocationRelease.objects.filter(allocation=allocation).first()
+    if existing:
+        if (existing.released_on, existing.reason) == (released_on, reason):
+            return existing
+        raise ValidationError("This allocation has already been released.")
+    if released_on < allocation.allocated_on:
+        raise ValidationError("A release cannot precede its allocation.")
+    closed_through = books_closed_through()
+    if closed_through and released_on <= closed_through:
+        raise ValidationError(f"The books are closed through {closed_through}; release in an open period.")
+    if not reason.strip():
+        raise ValidationError("Give a reason for the release.")
+    release = AllocationRelease.objects.create(allocation=allocation, released_on=released_on, reason=reason,
+                                               released_by=actor if getattr(actor, "is_authenticated", False) else None)
+    audit("payment.allocation_released", allocation, f"Allocation {allocation.reference} released from "
+          f"{invoice.number}", actor=actor, amount=str(allocation.amount), payment=str(payment.pk),
+          invoice=str(invoice.pk), reason=reason)
+    return release
+
+
 def receive_invoice_payment(invoice, *, amount, reference, received_on, actor=None):
     """Shortcut: one payment fully allocated to one invoice, sharing its reference."""
     invoice = Invoice.objects.get(pk=invoice.pk)
@@ -377,12 +407,17 @@ def invoice_aging(*, as_of):
     def dated_sum(records, date_field):
         return sum((r.amount for r in records if getattr(r, date_field) <= as_of), Decimal("0.00"))
 
+    def applied(allocations):
+        """Allocations in force at as_of: made by then and not released by then."""
+        return [a for a in allocations
+                if not (hasattr(a, "release") and a.release.released_on <= as_of)]
+
     invoices = Invoice.objects.filter(issue_date__lte=as_of, journal_entry__isnull=False).select_related(
-        "cancellation_entry").prefetch_related("allocations", "credit_notes")
+        "cancellation_entry").prefetch_related("allocations__release", "credit_notes")
     for invoice in invoices:
         if invoice.cancellation_entry and invoice.cancellation_entry.entry_date <= as_of:
             continue
-        balance = (invoice.posted_total - dated_sum(invoice.allocations.all(), "allocated_on")
+        balance = (invoice.posted_total - dated_sum(applied(invoice.allocations.all()), "allocated_on")
                    - dated_sum(invoice.credit_notes.all(), "issued_on"))
         if balance == 0:
             continue
@@ -391,9 +426,10 @@ def invoice_aging(*, as_of):
         totals = group(invoice.currency)
         totals[bucket] += balance
         totals["total"] += balance
-    payments = CustomerPayment.objects.filter(received_on__lte=as_of).prefetch_related("allocations", "refunds")
+    payments = CustomerPayment.objects.filter(received_on__lte=as_of).prefetch_related(
+        "allocations__release", "refunds")
     for payment in payments:
-        unapplied = (payment.amount - dated_sum(payment.allocations.all(), "allocated_on")
+        unapplied = (payment.amount - dated_sum(applied(payment.allocations.all()), "allocated_on")
                      - dated_sum(payment.refunds.all(), "refunded_on"))
         if unapplied:
             group(payment.currency)["unapplied"] += unapplied

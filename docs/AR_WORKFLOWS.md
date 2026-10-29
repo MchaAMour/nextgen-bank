@@ -30,6 +30,7 @@ amount not allocated or refunded remains customer credit inside AR.
 
 - Invoice open balance = posted total − allocations − credit notes.
 - Payment unapplied amount = amount − allocations − refunds.
+- Released allocations count in neither.
 - Neither can go below zero; allocations and credit notes cannot precede the
   invoice date, and allocations and refunds cannot precede the payment date.
 
@@ -40,8 +41,19 @@ details is rejected. Settlement records are append-only; corrections are new
 records.
 
 An invoice with allocations or credit notes cannot be cancelled. Issue a credit
-note for its open balance instead. Correcting an invoice that is already paid
-needs allocation release, which is not supported yet (see AR-05).
+note for its open balance instead.
+
+## Releasing an allocation
+
+`release_allocation(allocation, released_on=..., reason=...)` takes an
+allocation back in full, for example when a payment was applied to the wrong
+invoice, a paid invoice must be cancelled, or an applied payment is refunded.
+Like the allocation, it has no journal entry: the invoice is open again and the
+payment's credit unapplied, to be allocated elsewhere or refunded. The release
+date must be on or after the allocation date and in an open period; aging
+before that date still shows the allocation. A release is final; reapply the
+credit with a new allocation. An identical retry returns the original release,
+and each release is recorded in the audit log with its reason.
 
 Existing manual receipts were migrated to payments with one allocation each,
 keeping their reference and journal entry. The `receipts/` endpoint was
@@ -59,14 +71,16 @@ ORM writes are also rejected:
   entry).
 - Invoices are inserted as drafts. Posting requires a posted journal entry
   sourced from that invoice. A posted invoice may only become cancelled with a
-  posted entry that reverses its own, and only without allocations or credit
-  notes. Non-draft invoices cannot be deleted.
+  posted entry that reverses its own, and only without unreleased allocations
+  or credit notes. Non-draft invoices cannot be deleted.
 - Lines of non-draft invoices cannot be inserted, updated, moved or deleted.
 - Payments, allocations, refunds and credit notes are insert-only. Payments,
   refunds and credit notes require a posted entry whose debit and credit legs
   use the accounts above and equal the record's amount. Allocations and credit
   notes require enough open invoice balance; allocations and refunds require
-  enough unapplied payment.
+  enough unapplied payment. These balances ignore released allocations.
+- Releases are insert-only, follow their allocation's date and fall after the
+  latest period close (migration 0015).
 - Bulk ORM writes on these models raise `ValidationError`.
 
 Draft line writes lock the parent invoice row like `post_invoice`. On
@@ -116,6 +130,7 @@ Every write goes through the services above and needs its own permission:
 | `invoices/<id>/cancel/` | POST | `cancel_invoice` | `{"cancellation_date"}`; no settlements |
 | `payments/` | POST | `add_customerpayment`, `add_paymentallocation` | `{"customer", "reference", "amount", "currency", "received_on", "allocations": [{"invoice", "amount", "reference"}]}` |
 | `payments/<id>/allocations/` | POST | `add_paymentallocation` | `{"invoice", "amount", "reference", "allocated_on"}` |
+| `allocations/<id>/release/` | POST | `add_allocationrelease` | `{"released_on", "reason"}` |
 | `payments/<id>/refunds/` | POST | `add_paymentrefund` | `{"reference", "amount", "refunded_on"}` |
 | `credit-notes/` | POST | `add_creditnote` | `{"number", "invoice", "amount", "issued_on", "reason"}` |
 
@@ -130,8 +145,7 @@ requesting user as `posted_by` on their journal entry.
 
 ## Not yet supported
 
-Tax, period closing, and releasing allocations to correct a paid invoice. See
-[Engineering follow-ups](ENGINEERING_FOLLOW_UPS.md). Stripe payments are Goal 4.
+Tax (MONEY-01). See [Engineering follow-ups](ENGINEERING_FOLLOW_UPS.md).
 
 ## Roles
 
@@ -142,7 +156,7 @@ them to exactly these permissions, so it is safe to run again after upgrades:
 | --- | --- |
 | Accounting viewer | Read everything in accounting |
 | AR clerk | Customers, draft invoices, payments and allocations, Stripe checkout links |
-| AR manager | Post and cancel invoices, refunds, credit notes |
+| AR manager | Post and cancel invoices, refunds, credit notes, allocation releases |
 | AP clerk | Suppliers, draft bills, supplier payments and allocations |
 | AP approver | Approve, post and cancel bills |
 | Reconciler | Import bank statements, match lines, post bank-only items, sync Stripe |

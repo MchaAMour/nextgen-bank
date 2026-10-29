@@ -10,12 +10,12 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from django_filters.rest_framework import DjangoFilterBackend
 
-from .models import (BASE_CURRENCY, CreditNote, Customer, CustomerPayment, Invoice, InvoiceLine, PaymentAllocation, PaymentRefund,
+from .models import (BASE_CURRENCY, AllocationRelease, CreditNote, Customer, CustomerPayment, Invoice, InvoiceLine, PaymentAllocation, PaymentRefund,
     StripeCheckoutSession)
 from .permissions import AccountingPermission
 from .services import (allocate_payment, audit, cancel_invoice, create_draft_invoice, delete_draft_invoice,
     invoice_aging, issue_credit_note, post_invoice, record_customer_payment, refund_payment,
-    replace_draft_invoice)
+    release_allocation, replace_draft_invoice)
 from .stripe_payments import create_invoice_checkout
 from .views import LedgerPagination
 
@@ -127,10 +127,18 @@ class CancellationInput(serializers.Serializer):
     cancellation_date = serializers.DateField()
 
 
+class ReleaseSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AllocationRelease
+        fields = ["id", "allocation", "released_on", "reason", "released_by"]
+
+
 class AllocationSerializer(serializers.ModelSerializer):
+    release = ReleaseSerializer(read_only=True, default=None)
+
     class Meta:
         model = PaymentAllocation
-        fields = ["id", "payment", "invoice", "reference", "amount", "allocated_on"]
+        fields = ["id", "payment", "invoice", "reference", "amount", "allocated_on", "release"]
 
 
 class RefundSerializer(serializers.ModelSerializer):
@@ -167,6 +175,11 @@ class PaymentInput(serializers.Serializer):
     currency = serializers.CharField(max_length=3)
     received_on = serializers.DateField()
     allocations = AllocationInput(many=True, default=list)
+
+
+class ReleaseInput(serializers.Serializer):
+    released_on = serializers.DateField()
+    reason = serializers.CharField(max_length=500)
 
 
 class RefundInput(serializers.Serializer):
@@ -291,7 +304,7 @@ class PaymentList(generics.ListCreateAPIView):
     write_permissions = {"POST": ["accounting.add_customerpayment", "accounting.add_paymentallocation"]}
     serializer_class = PaymentSerializer
     queryset = CustomerPayment.objects.with_balances().prefetch_related(
-        "allocations", "refunds").order_by("-received_on", "id")
+        "allocations__release", "refunds").order_by("-received_on", "id")
     pagination_class = LedgerPagination
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ["customer", "currency"]
@@ -322,6 +335,20 @@ class PaymentAllocationCreate(APIView):
         allocation, code = replay_aware(PaymentAllocation, {"reference": data["reference"]},
                                         allocate_payment, payment, actor=request.user, **data)
         return Response(AllocationSerializer(allocation).data, status=code)
+
+
+class AllocationReleaseCreate(APIView):
+    """Take an allocation back: the invoice is open and the payment's credit unapplied again."""
+    permission_classes = [AccountingPermission]
+    required_permissions = PaymentList.required_permissions
+    write_permissions = {"POST": ["accounting.add_allocationrelease"]}
+
+    def post(self, request, pk):
+        allocation = get_object_or_404(PaymentAllocation, pk=pk)
+        data = validated(ReleaseInput, request.data)
+        release, code = replay_aware(AllocationRelease, {"allocation": allocation},
+                                     release_allocation, allocation, actor=request.user, **data)
+        return Response(ReleaseSerializer(release).data, status=code)
 
 
 class PaymentRefundCreate(APIView):

@@ -47,22 +47,26 @@ def _amount_sum(model, link, **filters):
                     output_field=models.DecimalField(max_digits=18, decimal_places=2))
 
 
+# Released allocations no longer apply a payment to an invoice.
+ACTIVE_ALLOCATIONS = {"release__isnull": True}
+
+
 class InvoiceQuerySet(ARQuerySet):
     def with_balances(self):
-        return self.annotate(allocated_total=_amount_sum(PaymentAllocation, "invoice"),
+        return self.annotate(allocated_total=_amount_sum(PaymentAllocation, "invoice", **ACTIVE_ALLOCATIONS),
                              credited_total=_amount_sum(CreditNote, "invoice"))
 
 
 class PaymentQuerySet(ARQuerySet):
     def with_balances(self):
-        return self.annotate(allocated_total=_amount_sum(PaymentAllocation, "payment"),
+        return self.annotate(allocated_total=_amount_sum(PaymentAllocation, "payment", **ACTIVE_ALLOCATIONS),
                              refunded_total=_amount_sum(PaymentRefund, "payment"))
 
 
-def _stored_total(obj, annotation, related):
+def _stored_total(obj, annotation, related, **filters):
     if hasattr(obj, annotation):
         return getattr(obj, annotation)
-    return getattr(obj, related).aggregate(total=models.Sum("amount"))["total"] or Decimal("0.00")
+    return getattr(obj, related).filter(**filters).aggregate(total=models.Sum("amount"))["total"] or Decimal("0.00")
 
 
 class Customer(TimeStampedModel):
@@ -143,7 +147,7 @@ class Invoice(TimeStampedModel):
         """Current balance; use Invoice.objects.with_balances() to avoid per-row queries."""
         if self.status != "posted":
             return Decimal("0.00")
-        return (self.posted_total - _stored_total(self, "allocated_total", "allocations")
+        return (self.posted_total - _stored_total(self, "allocated_total", "allocations", **ACTIVE_ALLOCATIONS)
                 - _stored_total(self, "credited_total", "credit_notes"))
 
     def delete(self, *args, **kwargs):
@@ -234,7 +238,7 @@ class CustomerPayment(AppendOnlyRecord):
     @property
     def unapplied_amount(self):
         """Customer credit still held in AR: not allocated to invoices and not refunded."""
-        return (self.amount - _stored_total(self, "allocated_total", "allocations")
+        return (self.amount - _stored_total(self, "allocated_total", "allocations", **ACTIVE_ALLOCATIONS)
                 - _stored_total(self, "refunded_total", "refunds"))
 
 
@@ -249,6 +253,20 @@ class PaymentAllocation(AppendOnlyRecord):
 
     class Meta:
         constraints = [models.CheckConstraint(check=models.Q(amount__gt=0), name="payment_allocation_positive")]
+
+
+class AllocationRelease(AppendOnlyRecord):
+    """Takes a payment allocation back in full: the invoice is open and the payment unapplied again.
+
+    No ledger effect, like the allocation itself. Used to correct a paid invoice or to
+    refund a payment that was applied.
+    """
+
+    allocation = models.OneToOneField(PaymentAllocation, on_delete=models.PROTECT, related_name="release")
+    released_on = models.DateField()
+    reason = models.CharField(max_length=500)
+    released_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.PROTECT,
+                                    related_name="allocation_releases")
 
 
 class PaymentRefund(AppendOnlyRecord):

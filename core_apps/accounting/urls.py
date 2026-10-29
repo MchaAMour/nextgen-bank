@@ -3,8 +3,8 @@ from django.urls import path
 from .ap_views import (APAgingReport, BillApprove, BillCancel, BillDetail, BillList, BillPost,
     SupplierAllocationCreate, SupplierDetail, SupplierList, SupplierPaymentDetail, SupplierPaymentList,
     SupplierStatement)
-from .ar_views import (AgingReport, CreditNoteList, CustomerDetail, CustomerList, InvoiceCancel,
-    InvoiceCheckout, InvoiceDetail, InvoiceList, InvoicePost, PaymentAllocationCreate, PaymentDetail,
+from .ar_views import (AgingReport, AllocationReleaseCreate, CreditNoteList, CustomerDetail, CustomerList,
+    InvoiceCancel, InvoiceCheckout, InvoiceDetail, InvoiceList, InvoicePost, PaymentAllocationCreate, PaymentDetail,
     PaymentList, PaymentRefundCreate)
 from .bank_views import (AutoMatch, BankReconciliationReport, LineMatch, LinePost, StatementCsvImport,
     StatementDetail, StatementList)
@@ -29,6 +29,7 @@ urlpatterns = [
     path("payments/", PaymentList.as_view(), name="payments"),
     path("payments/<uuid:pk>/", PaymentDetail.as_view(), name="payment-detail"),
     path("payments/<uuid:pk>/allocations/", PaymentAllocationCreate.as_view(), name="payment-allocations"),
+    path("allocations/<uuid:pk>/release/", AllocationReleaseCreate.as_view(), name="allocation-release"),
     path("payments/<uuid:pk>/refunds/", PaymentRefundCreate.as_view(), name="payment-refunds"),
     path("credit-notes/", CreditNoteList.as_view(), name="credit-notes"),
     path("ar-aging/", AgingReport.as_view(), name="ar-aging"),

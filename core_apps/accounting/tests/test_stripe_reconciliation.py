@@ -9,7 +9,7 @@ from django.core.exceptions import ValidationError
 from django.db.models import Sum
 
 from core_apps.accounting.models import ChartOfAccount, JournalEntry, JournalLine, PaymentRefund, StripeBalanceTransaction
-from core_apps.accounting.services import post_invoice, record_customer_payment, refund_payment
+from core_apps.accounting.services import post_invoice, record_customer_payment, refund_payment, release_allocation
 from core_apps.accounting.stripe_reconciliation import (clearing_balance, reconciliation_report,
     sync_balance_transactions)
 from .test_api import client, user
@@ -176,6 +176,17 @@ def test_refund_beyond_unapplied_credit_needs_review_and_posts_nothing(posted, s
     record = StripeBalanceTransaction.objects.get()
     assert record.state == "needs_review" and "unapplied" in record.review_reason
     assert (record.refund, record.payment, PaymentRefund.objects.count()) == (None, None, 0)
+
+
+def test_refund_of_an_applied_payment_posts_once_the_allocation_is_released(posted, stripe_api):
+    payment = stripe_payment(posted)
+    refund_source = {"id": "re_1", "object": "refund", "payment_intent": "pi_1"}
+    stripe_api.listed = [txn("txn_re", "refund", "-100", source=refund_source)]
+    assert sync_balance_transactions()["needs_review"] == 1
+    release_allocation(payment.allocations.get(), released_on=date(2026, 1, 21), reason="Refunded in Stripe")
+    assert sync_balance_transactions()["posted"] == 1
+    posted.refresh_from_db()
+    assert posted.open_balance == Decimal("100") and PaymentRefund.objects.get().amount == Decimal("100")
 
 
 @pytest.mark.parametrize("data, reason", [

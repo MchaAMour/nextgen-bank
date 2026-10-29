@@ -89,8 +89,9 @@ reason, when the charge's payment is not recorded yet (its webhook is pending),
 the amounts or the clearing account do not match, a refund exceeds the
 payment's unapplied credit, the currency is not EUR, or the category is not
 listed (disputes, for example). Every sync retries these. A refund of a payment
-that is already allocated to an invoice stays in review until allocations can
-be released (AR-05).
+that is already allocated to an invoice stays in review until the allocation is
+released (see AR workflows); the next sync then posts it and the invoice is
+open again.
 
 Each sync lists transactions created from one day before the newest stored one
 (the first sync lists all), with their sources expanded.

@@ -24,8 +24,8 @@ amounts are EUR; tax is not supported (MONEY-01).
 - Approved bills cannot be edited; cancel and draft again. The approver and
   approval time are stored, and the database rejects a creator approving their
   own bill.
-- A bill with allocated payments cannot be cancelled (allocation release is not
-  supported, as in AR-05).
+- A bill with allocated payments cannot be cancelled. Supplier allocations
+  cannot be released yet; customer allocations can (AR workflows).
 
 ## Payments and balances
 

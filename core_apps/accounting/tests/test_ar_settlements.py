@@ -15,6 +15,7 @@ from core_apps.accounting.services import (_post_pair, allocate_payment, cancel_
 from .test_api import client, user
 from .test_ar_integrity import db_id, new_id, raw
 from .test_ar_write_api import WRITE_PERMISSIONS, grant
+from .test_ledger_integrity import starter_chart
 
 pytestmark = pytest.mark.django_db
 DAY = date(2026, 1, 1)
@@ -250,7 +251,7 @@ def delete_ar_rows_with_triggers_suspended():
 
 
 @pytest.mark.django_db(transaction=True)
-def test_receipts_migrate_to_single_allocation_payments():
+def test_receipts_migrate_to_single_allocation_payments(starter_chart):
     executor = MigrationExecutor(connection)
     before, after = [("accounting", "0005_ar_document_integrity")], [("accounting", "0006_ar_settlements")]
     executor.migrate(before)
@@ -272,6 +273,8 @@ def test_receipts_migrate_to_single_allocation_payments():
             amount=Decimal("40"), received_on=DAY, journal_entry_id=entry.pk)
         executor = MigrationExecutor(connection)
         executor.migrate(after)
+        # Current models query tables added since 0006.
+        MigrationExecutor(connection).migrate(MigrationExecutor(connection).loader.graph.leaf_nodes())
         payment = CustomerPayment.objects.with_balances().get(reference="R-OLD")
         allocation = payment.allocations.get()
         assert (payment.journal_entry_id, payment.amount, payment.unapplied_amount) == (entry.pk, 40, 0)
