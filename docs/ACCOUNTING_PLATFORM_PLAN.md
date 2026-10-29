@@ -148,7 +148,7 @@ unapplied credit, credit notes, historical aging reconciled to the AR ledger,
 database integrity enforcement, and protected read/write APIs. See
 [AR workflows](AR_WORKFLOWS.md). Totals round each line to two decimal places
 before summing. Drafts do not create journal entries. Period closing and
-allocation release followed (AR-05); tax remains open (MONEY-01).
+allocation release followed (AR-05); no VAT by decision (MONEY-01).
 
 - Add customers, invoice drafts, invoice lines, posting, and cancellation.
 - Calculate invoice open balances and AR aging.

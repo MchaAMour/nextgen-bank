@@ -15,7 +15,7 @@ regression test or documented verification; record the evidence here.
 | CFG-01 | Medium / closed | `base.py` skips `.envs/.env.production` under `config.settings.test*`, and `core_apps/conftest.py` makes any non-loopback socket connection raise in tests (database drivers connect through libpq and are unaffected). Tests: `test_tests_cannot_reach_the_network`, `test_deployment_dotenv_is_not_loaded_in_tests`. |
 | CFG-02 | Medium / closed | `requirements/` is the only dependency source and what the Docker images install; `requirements/constraints.txt` (from `make lock-requirements`) pins every transitive package to the versions the tests ran with, and both images build with it. The stale `Pipfile`/`Pipfile.lock` were removed. |
 | AUTH-01 | Medium / closed | `python manage.py setup_accounting_roles` creates or resets seven groups (Accounting viewer, AR clerk, AR manager, AP clerk, AP approver, Reconciler, Controller) with exactly their permissions (`core_apps/accounting/roles.py`). Tests: idempotent reset, least privilege (no role can change or delete journal or audit rows; clerks cannot post or approve), and role checks through the API. |
-| MONEY-01 | Medium / decided | Decided 2026-10-28: EUR, the Stripe account's settlement currency, is the only ledger currency (migration 0008 constrains invoices, payments and journal lines; system check `accounting.E001` rejects another `ACCOUNTING_BASE_CURRENCY`). Other currencies need exchange rates and FX gain/loss accounting. Tax/VAT requirements remain undecided. |
+| MONEY-01 | Medium / decided | Decided 2026-10-28: EUR, the Stripe account's settlement currency, is the only ledger currency (migration 0008 constrains invoices, payments and journal lines; system check `accounting.E001` rejects another `ACCOUNTING_BASE_CURRENCY`). Other currencies need exchange rates and FX gain/loss accounting. Decided 2026-10-29: no VAT or other tax; invoices and bills carry net amounts only. |
 | OBS-01 | Low / closed | The USE_TZ warning came from `import cloudinary` in `base.py`, which read Django settings while they were half-loaded; Cloudinary is now configured in `CommonConfig.ready()` and Django setup raises no deprecation warnings. The remaining ReportLab 4.2.2 warning (its own code on Python 3.12) is filtered by message and module in `pytest.ini`; drop the filter when ReportLab is upgraded. |
 | STRIPE-01 | Medium / open | `STRIPE_SECRET_KEY` is a full test-mode secret key. Before any shared or deployed environment, replace it with a restricted key (`rk_`) limited to Checkout Sessions (write), Balance, Balance Transactions and Disputes (read), and Account (read, for the `STRIPE_ACCOUNT_ID` check), and keep it in a secrets vault. |
 | STRIPE-02 | High / closed | Balance transaction sync (migrations 0009 and 0016) posts charge fees, payouts, payout reversals, Stripe fees, refunds and disputes (withdrawal to 1150, reversal back, lost disputes written off to 5110), and reports clearing (1010) against the Stripe balance; `schedule_stripe_sync` schedules it in Celery beat. Other categories are left for review with nothing posted. Verified live against the dedicated sandbox on 2026-10-29 (evidence under Completed safeguards). |
@@ -139,9 +139,8 @@ regression test or documented verification; record the evidence here.
 
 - Ledger reporting is read-only; do not describe the ledger as production-ready.
 - Goals 3 to 6 (AR, Stripe, AP, reconciliation, reports, audit) pass on
-  SQLite and PostgreSQL in CI. Until the restricted key (STRIPE-01), a public
-  webhook (STRIPE-03) and a tax decision (MONEY-01), none of it is
-  production-ready.
+  SQLite and PostgreSQL in CI. Until the restricted key (STRIPE-01) and a public
+  webhook (STRIPE-03), none of it is production-ready. No VAT (MONEY-01).
 
 ## Latest verification
 
@@ -149,4 +148,4 @@ Checkout return pages stage (2026-10-29): `make test` 320 passed and 4
 PostgreSQL-only tests skipped on SQLite; `make test-postgres` 324 passed on
 PostgreSQL 16; `makemigrations --check` found no changes. Live sandbox
 payment and balance sync reconciled (STRIPE-02); GitHub Actions passed on main
-(PG-01). EUR is the only ledger currency (MONEY-01). Tax is not supported.
+(PG-01). EUR is the only ledger currency and there is no VAT (MONEY-01).
