@@ -218,6 +218,9 @@ posted for it.
 
 ## Further reading
 
+- [PROJECT_OVERVIEW.md](PROJECT_OVERVIEW.md): the course baseline and what this fork adds
+- [LEDGER.md](LEDGER.md): the ledger in depth
+- [DEMO.md](DEMO.md): walkthrough of the live demo
 - [ACCOUNTING_PLATFORM_PLAN.md](ACCOUNTING_PLATFORM_PLAN.md): goals and phases
 - [LEDGER_API.md](LEDGER_API.md), [AR_WORKFLOWS.md](AR_WORKFLOWS.md), [AP_WORKFLOWS.md](AP_WORKFLOWS.md)
 - [BANK_RECONCILIATION.md](BANK_RECONCILIATION.md), [STRIPE_PAYMENTS.md](STRIPE_PAYMENTS.md), [FINANCIAL_REPORTS.md](FINANCIAL_REPORTS.md)
