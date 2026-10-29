@@ -565,3 +565,75 @@ class JournalLine(TimeStampedModel):
         ).exclude(status=JournalEntry.Status.DRAFT).exists():
             raise ValidationError("Lines belonging to posted entries cannot be deleted.")
         super().delete(*args, **kwargs)
+
+
+class BankQuerySet(GuardedQuerySet):
+    label = "bank statement"
+
+
+class BankStatement(AppendOnlyRecord):
+    """An imported statement of a bank account. Statements of one account form a chain:
+    each starts after the previous one ends, with its closing balance as opening balance."""
+
+    objects = BankQuerySet.as_manager()
+
+    account = models.ForeignKey(ChartOfAccount, on_delete=models.PROTECT, related_name="bank_statements")
+    reference = models.CharField(max_length=100, unique=True)
+    start_date = models.DateField()
+    end_date = models.DateField()
+    opening_balance = models.DecimalField(max_digits=18, decimal_places=2)
+    closing_balance = models.DecimalField(max_digits=18, decimal_places=2)
+    currency = models.CharField(max_length=3, default=BASE_CURRENCY)
+    imported_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL,
+                                    related_name="bank_statements")
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(check=models.Q(end_date__gte=models.F("start_date")),
+                                   name="bank_statement_period_valid"),
+            models.CheckConstraint(check=models.Q(currency__in=INVOICE_CURRENCIES),
+                                   name="bank_statement_currency_supported"),
+        ]
+
+
+class BankStatementLine(AppendOnlyRecord):
+    """One bank movement: positive amounts are money in, negative money out."""
+
+    objects = BankQuerySet.as_manager()
+
+    statement = models.ForeignKey(BankStatement, on_delete=models.PROTECT, related_name="lines")
+    sequence = models.PositiveIntegerField()
+    booked_on = models.DateField()
+    amount = models.DecimalField(max_digits=18, decimal_places=2)
+    description = models.CharField(max_length=500, blank=True)
+    bank_reference = models.CharField(max_length=255, blank=True)
+
+    class Meta:
+        ordering = ["booked_on", "sequence"]
+        constraints = [
+            models.UniqueConstraint(fields=["statement", "sequence"], name="bank_line_sequence_unique"),
+            models.CheckConstraint(check=~models.Q(amount=0), name="bank_line_amount_nonzero"),
+        ]
+
+
+class BankMatch(TimeStampedModel):
+    """Pairs a statement line with the posted ledger line for the same movement of the bank account.
+    Deleting a match unmatches both; the statement and the ledger stay unchanged."""
+
+    class Method(models.TextChoices):
+        AUTOMATIC = "automatic", _("Automatic")
+        MANUAL = "manual", _("Manual")
+        POSTED = "posted", _("Posted from the statement")
+
+    objects = BankQuerySet.as_manager()
+
+    statement_line = models.OneToOneField(BankStatementLine, on_delete=models.PROTECT, related_name="match")
+    journal_line = models.OneToOneField("JournalLine", on_delete=models.PROTECT, related_name="bank_match")
+    method = models.CharField(max_length=10, choices=Method.choices)
+    matched_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL,
+                                   related_name="bank_matches")
+
+    def save(self, *args, **kwargs):
+        if type(self).objects.filter(pk=self.pk).exists():
+            raise ValidationError("Bank matches cannot be changed; unmatch and match again.")
+        return super().save(*args, **kwargs)

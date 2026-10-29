@@ -90,6 +90,14 @@ regression test or documented verification; record the evidence here.
   (single process) and PostgreSQL 16. Not yet run against a live Stripe
   account.
 
+- Bank statements (migration `0010_bank_statements`): 22 tests in
+  `test_bank_reconciliation.py` cover import validation and chaining, replay,
+  automatic matching (window, reference, nearest date, ties), manual
+  match/unmatch, posting bank-only items, control-account refusal, timing
+  differences across statements, opening differences, CSV parsing, raw-SQL
+  rejection by the triggers, and the APIs. 0010 reversed and reapplied on
+  SQLite and PostgreSQL 16; one-off PostgreSQL run: 235 accounting tests passed.
+
 ## Scope checkpoints
 
 - Ledger reporting is read-only; do not describe the ledger as production-ready.
@@ -99,9 +107,9 @@ regression test or documented verification; record the evidence here.
 
 ## Latest verification
 
-Stripe reconciliation stage (Goal 6, step 2): `make test` ran 214 SQLite
-tests, all passed; `make check` reported no issues; `makemigrations --check`
-found no changes. A one-off PostgreSQL 16 run passed all 213 accounting tests.
+Bank reconciliation stage (Goal 6, step 3): `make test` ran 236 SQLite
+tests, all passed; `makemigrations --check` found no changes. A one-off
+PostgreSQL 16 run passed all 235 accounting tests.
 One live test-mode Checkout payment succeeded end to end (STRIPE-04); the
 balance sync has not run against Stripe yet (waiting for the dedicated
 sandbox). PG-01 (a PostgreSQL test job)

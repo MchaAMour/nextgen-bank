@@ -190,8 +190,9 @@ tests.
 - Import bank/Stripe settlement data.
 - Reconcile clearing account, Stripe fees, refunds, and payouts. *Stripe part
   done: balance transaction sync and clearing report
-  ([Stripe payments](STRIPE_PAYMENTS.md#reconciliation)); bank statements
-  remain.*
+  ([Stripe payments](STRIPE_PAYMENTS.md#reconciliation)). Bank statements
+  done: import, matching and reconciliation for 1000
+  ([Bank reconciliation](BANK_RECONCILIATION.md)).*
 - Add balance sheet, profit and loss, customer/supplier statements, and audit
   history.
 

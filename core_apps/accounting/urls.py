@@ -3,6 +3,8 @@ from django.urls import path
 from .ar_views import (AgingReport, CreditNoteList, CustomerDetail, CustomerList, InvoiceCancel,
     InvoiceCheckout, InvoiceDetail, InvoiceList, InvoicePost, PaymentAllocationCreate, PaymentDetail,
     PaymentList, PaymentRefundCreate)
+from .bank_views import (AutoMatch, BankReconciliationReport, LineMatch, LinePost, StatementCsvImport,
+    StatementDetail, StatementList)
 from .stripe_views import BalanceTransactionList, BalanceTransactionSync, StripeReconciliation, StripeWebhook
 from .views import AccountList, EntryList, EntryDetail, GeneralLedger, TrialBalance
 
@@ -26,6 +28,13 @@ urlpatterns = [
     path("payments/<uuid:pk>/refunds/", PaymentRefundCreate.as_view(), name="payment-refunds"),
     path("credit-notes/", CreditNoteList.as_view(), name="credit-notes"),
     path("ar-aging/", AgingReport.as_view(), name="ar-aging"),
+    path("bank-statements/", StatementList.as_view(), name="bank-statements"),
+    path("bank-statements/import-csv/", StatementCsvImport.as_view(), name="bank-statement-csv"),
+    path("bank-statements/auto-match/", AutoMatch.as_view(), name="bank-auto-match"),
+    path("bank-statements/<uuid:pk>/", StatementDetail.as_view(), name="bank-statement-detail"),
+    path("bank-lines/<uuid:pk>/match/", LineMatch.as_view(), name="bank-line-match"),
+    path("bank-lines/<uuid:pk>/post/", LinePost.as_view(), name="bank-line-post"),
+    path("bank-reconciliation/", BankReconciliationReport.as_view(), name="bank-reconciliation"),
     path("accounts/", AccountList.as_view(), name="accounts"),
     path("entries/", EntryList.as_view(), name="entries"),
     path("entries/<uuid:pk>/", EntryDetail.as_view(), name="entry-detail"),
