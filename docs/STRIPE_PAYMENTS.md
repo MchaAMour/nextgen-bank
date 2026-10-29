@@ -83,12 +83,22 @@ Stripe ID, so that 1010 follows the Stripe balance:
 | `payout` | Dr 1000 Cash and Bank / Cr 1010; payout fees Dr 5100 |
 | `payout_reversal` | Dr 1010 / Cr 1000 |
 | `fee` | Stripe fees billed separately: Dr 5100 / Cr 1010 |
+| `dispute` | Disputed amount withdrawn: Dr 1150 Disputed Stripe Payments; dispute fee Dr 5100 / Cr 1010 |
+| `dispute_reversal` | Dispute won: Dr 1010 / Cr 1150; a returned fee credits 5100 |
+
+Disputes post whether or not the charge belongs to a recorded payment; the
+payment is linked when it is. While a dispute is open, each sync looks up its
+status in Stripe. Once Stripe reports it as lost, its amount is written off once
+(Dr 5110 Chargeback Losses / Cr 1150) and linked as the transaction's
+`loss_entry`. The invoice stays paid: the customer did pay, and billing them
+again is a separate decision. The report's `open_disputes` is the 1150 balance,
+money held by open disputes.
 
 Nothing is posted, and the transaction is stored as `needs_review` with a
 reason, when the charge's payment is not recorded yet (its webhook is pending),
 the amounts or the clearing account do not match, a refund exceeds the
 payment's unapplied credit, the currency is not EUR, or the category is not
-listed (disputes, for example). Every sync retries these. A refund of a payment
+listed. Every sync retries these. A refund of a payment
 that is already allocated to an invoice stays in review until the allocation is
 released (see AR workflows); the next sync then posts it and the invoice is
 open again.
@@ -110,9 +120,11 @@ before reading the report. `reconciled` is true only with no difference, no
 review items and no unsynced payments.
 
 From the command line, `python manage.py sync_stripe_balance` syncs and prints
-the report. The Celery task `sync_stripe_balance_transactions` can be scheduled
-under Periodic tasks in the Django admin (django_celery_beat); no schedule is
-set up by default.
+the report. `python manage.py schedule_stripe_sync` creates or updates the
+Celery beat task "Stripe balance sync" (hourly by default; `--every-minutes N`
+with N of at least 5, `--disable` to pause it). It is also editable under
+Periodic tasks in the Django admin. Without `STRIPE_SECRET_KEY` the task logs a
+warning and skips.
 
 The Stripe account must be used only by this application, since every balance
 transaction is reconciled against this ledger. See

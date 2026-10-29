@@ -387,6 +387,9 @@ class StripeBalanceTransaction(TimeStampedModel):
                                   related_name="stripe_balance_transaction")
     journal_entry = models.OneToOneField("JournalEntry", null=True, blank=True, on_delete=models.PROTECT,
                                          related_name="stripe_balance_transaction")
+    # A lost dispute's write-off from disputed payments (1150) to chargeback losses (5110).
+    loss_entry = models.OneToOneField("JournalEntry", null=True, blank=True, on_delete=models.PROTECT,
+                                      related_name="stripe_dispute_loss")
     payload = models.JSONField()
 
     class Meta:

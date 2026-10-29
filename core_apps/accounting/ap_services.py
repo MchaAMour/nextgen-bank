@@ -25,7 +25,7 @@ AP_ACCOUNT = "2000"
 ZERO = Decimal("0.00")
 # Lines may expense a purchase or capitalize it; control accounts have their own workflows.
 LINE_ACCOUNT_TYPES = {ChartOfAccount.AccountType.EXPENSE, ChartOfAccount.AccountType.ASSET}
-CONTROL_ACCOUNTS = {"1000", "1010", "1100", "2000"}
+CONTROL_ACCOUNTS = {"1000", "1010", "1100", "1150", "2000"}
 
 
 def _active_supplier(supplier):

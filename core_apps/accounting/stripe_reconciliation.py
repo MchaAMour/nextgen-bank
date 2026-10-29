@@ -10,9 +10,14 @@ that Stripe clearing follows the Stripe balance:
 | refund | Refund of the payment's unapplied credit: debit 1100, credit 1010 |
 | payout, payout_reversal | Debit or credit cash and bank (1000) against 1010; payout fees to 5100 |
 | fee | Stripe fees billed separately: debit 5100, credit 1010 |
+| dispute | Disputed amount withdrawn: debit disputed payments (1150), dispute fee to 5100, credit 1010 |
+| dispute_reversal | Dispute won: debit 1010, credit 1150; a returned fee credits 5100 |
 
-Anything else, or anything that does not match the ledger, posts nothing and is
-stored as needing review; reviews are retried on every sync.
+A dispute that Stripe reports as lost is written off once: debit chargeback
+losses (5110), credit 1150. The invoice stays paid; billing the customer again
+is a separate decision. Anything else, or anything that does not match the
+ledger, posts nothing and is stored as needing review; reviews are retried on
+every sync.
 """
 
 from datetime import timedelta
@@ -28,7 +33,10 @@ from .services import audit, post_lines, refund_payment
 from .stripe_payments import MINOR_UNITS, _from_timestamp, stripe_client
 
 CLEARING, CASH, FEES = "1010", "1000", "5100"
-CLEARING_CATEGORIES = {"payout", "payout_reversal", "fee"}
+DISPUTED, CHARGEBACK_LOSSES = "1150", "5110"
+# The account on the other side of Stripe clearing for each category that only moves money.
+COUNTER_ACCOUNTS = {"payout": CASH, "payout_reversal": CASH, "fee": FEES,
+                    "dispute": DISPUTED, "dispute_reversal": DISPUTED}
 # Transactions created up to this long before the newest stored one are listed again,
 # which also refreshes their pending/available status.
 SYNC_OVERLAP = timedelta(days=1)
@@ -115,10 +123,11 @@ def _post(record, actor):
         record.refund = refund_payment(record.payment, amount=-record.amount, reference=f"stripe:{record.source_id}",
                                        refunded_on=entry_date, actor=actor, cash_account=CLEARING)
         return StripeBalanceTransaction.State.POSTED
-    elif category in CLEARING_CATEGORIES:
-        # The non-clearing side is cash and bank for payouts and fees for Stripe fees.
-        main = FEES if category == "fee" else CASH
-        lines = [_signed(main, -record.amount), _signed(FEES, record.fee), _signed(CLEARING, record.net)]
+    elif category in COUNTER_ACCOUNTS:
+        if category.startswith("dispute"):
+            record.payment = _disputed_payment(record)
+        lines = [_signed(COUNTER_ACCOUNTS[category], -record.amount), _signed(FEES, record.fee),
+                 _signed(CLEARING, record.net)]
     else:
         raise NeedsReview(f"Stripe category '{category}' is not posted automatically.")
     if not any(debit or credit for _, debit, credit in lines):
@@ -143,6 +152,40 @@ def _stripe_payment(record):
     return payment
 
 
+def _disputed_payment(record):
+    """The disputed Checkout payment, for reference; disputes on other charges post all the same."""
+    try:
+        return _stripe_payment(record)
+    except NeedsReview:
+        return None
+
+
+def write_off_lost_disputes(*, client, actor=None):
+    """Move each dispute that Stripe reports as lost from disputed payments (1150) to chargeback losses."""
+    won = StripeBalanceTransaction.objects.filter(reporting_category="dispute_reversal").values("source_id")
+    open_disputes = StripeBalanceTransaction.objects.filter(
+        reporting_category="dispute", state=StripeBalanceTransaction.State.POSTED,
+        loss_entry__isnull=True).exclude(source_id__in=won)
+    written_off = 0
+    for record in open_disputes.order_by("stripe_created", "stripe_id"):
+        if _as_dict(client.v1.disputes.retrieve(record.source_id)).get("status") != "lost":
+            continue
+        with transaction.atomic():
+            record = StripeBalanceTransaction.objects.select_for_update().get(pk=record.pk)
+            if record.loss_entry_id:
+                continue
+            amount = -record.amount
+            record.loss_entry = post_lines(
+                [(CHARGEBACK_LOSSES, amount, Decimal("0")), (DISPUTED, Decimal("0"), amount)],
+                currency=record.currency, source_type="stripe_balance_transaction", source_id=record.pk,
+                entry_date=timezone.localdate(), memo=f"Stripe dispute {record.source_id} lost", actor=actor)
+            record.save(update_fields=["loss_entry", "updated_at"])
+            audit("stripe_dispute.lost", record, f"Stripe dispute {record.source_id} lost", actor=actor,
+                  amount=str(amount))
+        written_off += 1
+    return written_off
+
+
 def sync_balance_transactions(*, client=None, actor=None):
     """List new Stripe balance transactions, store them, and post everything not yet finished."""
     client = client or stripe_client()
@@ -160,13 +203,20 @@ def sync_balance_transactions(*, client=None, actor=None):
     for record in pending.order_by("stripe_created", "stripe_id"):
         state = apply_balance_transaction(record, actor=actor).state
         counts[state] = counts.get(state, 0) + 1
+    lost = write_off_lost_disputes(client=client, actor=actor)
+    if lost:
+        counts["disputes_lost"] = lost
     return counts
 
 
-def clearing_balance():
-    totals = JournalLine.objects.filter(account__code=CLEARING, entry__status__in=JournalEntry.IN_LEDGER).aggregate(
+def account_balance(code):
+    totals = JournalLine.objects.filter(account__code=code, entry__status__in=JournalEntry.IN_LEDGER).aggregate(
         debit=Sum("debit"), credit=Sum("credit"))
     return _cents(totals["debit"]) - _cents(totals["credit"])
+
+
+def clearing_balance():
+    return account_balance(CLEARING)
 
 
 def reconciliation_report(*, client=None):
@@ -196,5 +246,7 @@ def reconciliation_report(*, client=None):
         "unsynced_payments": {"count": unsynced.count(),
                               "amount": _cents(unsynced.aggregate(total=Sum("amount"))["total"])},
         "unexplained": difference - review_net,
+        # Withdrawn by open disputes: returned if won, written off if lost.
+        "open_disputes": account_balance(DISPUTED),
         "reconciled": difference == 0 and not review.exists() and not unsynced.exists(),
     }

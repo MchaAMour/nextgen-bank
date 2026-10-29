@@ -36,7 +36,7 @@ bank-only items posted from the statement.
 - **Manual**: match a line with a chosen ledger line, or unmatch it. Matches are
   never edited; unmatching deletes the match only.
 - **Posted**: bank-only items (charges, interest) are posted against another
-  account and matched in one step. Control accounts (1000, 1010, 1100, 2000)
+  account and matched in one step. Control accounts (1000, 1010, 1100, 1150, 2000)
   are refused; customer receipts go through payments.
 
 A database trigger rejects any match whose ledger line is not posted, belongs to

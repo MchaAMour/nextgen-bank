@@ -34,6 +34,7 @@ def stripe_api():
     client.v1.balance_transactions.list.side_effect = lambda params: MagicMock(
         auto_paging_iter=lambda: iter(client.listed))
     client.v1.balance.retrieve.return_value = {"available": [], "pending": []}
+    client.v1.disputes.retrieve.return_value = {"status": "needs_response"}
     with patch("core_apps.accounting.stripe_reconciliation.stripe_client", return_value=client):
         yield client
 
@@ -168,6 +169,51 @@ def test_stripe_refund_returns_unapplied_credit_from_clearing(posted, stripe_api
     assert clearing_balance() == Decimal("56.80")
 
 
+def dispute(txn_id, category, amount, fee, payment_intent="pi_1"):
+    return txn(txn_id, category, amount, fee, {"id": "dp_1", "object": "dispute", "payment_intent": payment_intent})
+
+
+def test_won_dispute_returns_the_amount_and_keeps_the_fee(posted, stripe_api):
+    payment = stripe_payment(posted)
+    stripe_api.listed = [charge(), dispute("txn_dp", "dispute", "-100", "15")]
+    assert sync_balance_transactions() == {"listed": 2, "posted": 2}
+    record = StripeBalanceTransaction.objects.get(stripe_id="txn_dp")
+    assert (record.payment, record.source_id) == (payment, "dp_1")
+    assert {(l.account.code, l.debit, l.credit) for l in record.journal_entry.lines.all()} == {
+        ("1150", Decimal("100"), 0), ("5100", Decimal("15"), 0), ("1010", 0, Decimal("115"))}
+    stripe_balance(stripe_api, pending="-18.20")
+    report = reconciliation_report()
+    assert report["reconciled"] and report["open_disputes"] == Decimal("100")
+
+    stripe_api.listed = [dispute("txn_dpr", "dispute_reversal", "100", "0")]
+    stripe_api.v1.disputes.retrieve.reset_mock()
+    assert sync_balance_transactions()["posted"] == 1
+    assert (balance("1150"), balance("1010"), balance("5100")) == (0, Decimal("81.80"), Decimal("18.20"))
+    stripe_api.v1.disputes.retrieve.assert_not_called()  # A won dispute is no longer looked up.
+
+
+def test_lost_dispute_is_written_off_once(posted, stripe_api):
+    stripe_payment(posted)
+    stripe_api.listed = [charge(), dispute("txn_dp", "dispute", "-100", "15")]
+    sync_balance_transactions()
+    assert balance("5110") == 0  # Still under review at Stripe.
+    stripe_api.v1.disputes.retrieve.return_value = {"status": "lost"}
+    assert sync_balance_transactions()["disputes_lost"] == 1
+    assert "disputes_lost" not in sync_balance_transactions()
+    record = StripeBalanceTransaction.objects.get(stripe_id="txn_dp")
+    assert {(l.account.code, l.debit, l.credit) for l in record.loss_entry.lines.all()} == {
+        ("5110", Decimal("100"), 0), ("1150", 0, Decimal("100"))}
+    assert (balance("1150"), balance("5110")) == (0, Decimal("100"))
+    posted.refresh_from_db()
+    assert posted.open_balance == 0  # The invoice stays paid.
+
+
+def test_dispute_on_an_unknown_charge_still_posts(stripe_api):
+    stripe_api.listed = [dispute("txn_dp", "dispute", "-40", "15", payment_intent="pi_elsewhere")]
+    assert sync_balance_transactions() == {"listed": 1, "posted": 1}
+    assert StripeBalanceTransaction.objects.get().payment is None and balance("1150") == Decimal("40")
+
+
 def test_refund_beyond_unapplied_credit_needs_review_and_posts_nothing(posted, stripe_api):
     stripe_payment(posted)
     refund_source = {"id": "re_1", "object": "refund", "payment_intent": "pi_1"}
@@ -190,7 +236,7 @@ def test_refund_of_an_applied_payment_posts_once_the_allocation_is_released(post
 
 
 @pytest.mark.parametrize("data, reason", [
-    (txn("txn_dp", "dispute", "-100", fee="15", source="dp_1"), "'dispute' is not posted automatically"),
+    (txn("txn_tr", "transfer", "-100", source="tr_1"), "'transfer' is not posted automatically"),
     (txn("txn_usd", "payout", "-10", currency="usd"), "USD is not the ledger currency"),
     (txn("txn_ch", "charge", "10", source="ch_1"), "has no payment intent"),
 ])

@@ -95,10 +95,10 @@ def test_inactive_accountant_denied(client, user):
 def test_accounts_filter_search_and_pagination(client):
     response = client.get(BASE + "accounts/", {"account_type": "asset", "page_size": 2})
     assert response.status_code == 200
-    assert response.data["count"] == 3
+    assert response.data["count"] == 4
     assert len(response.data["results"]) == 2
     assert response.data["next"] is not None
-    response = client.get(BASE + "accounts/", {"search": "Stripe"})
+    response = client.get(BASE + "accounts/", {"search": "Stripe Clearing"})
     assert response.data["count"] == 1
     assert response.data["results"][0]["code"] == "1010"
 

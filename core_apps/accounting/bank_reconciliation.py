@@ -21,7 +21,7 @@ from .services import audit, post_lines
 
 BANK_ACCOUNTS = {"1000"}
 # Posting a bank-only item to these would bypass their subledgers or the Stripe sync.
-CONTROL_ACCOUNTS = {"1000", "1010", "1100", "2000"}
+CONTROL_ACCOUNTS = {"1000", "1010", "1100", "1150", "2000"}
 # A bank line is booked on or after its ledger entry: payouts take days to arrive.
 MATCH_DAYS_BEFORE, MATCH_DAYS_AFTER = 10, 3
 CSV_COLUMNS = {"date", "amount", "description", "reference"}

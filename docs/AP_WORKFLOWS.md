@@ -20,7 +20,7 @@ amounts are EUR; tax is not supported (MONEY-01).
 - `number` is the supplier's invoice number, unique per supplier.
 - Each line names the account it is charged to: an active expense account, or
   an asset account for purchases that are capitalized. Control accounts (1000,
-  1010, 1100, 2000) are refused.
+  1010, 1100, 1150, 2000) are refused.
 - Approved bills cannot be edited; cancel and draft again. The approver and
   approval time are stored, and the database rejects a creator approving their
   own bill.
