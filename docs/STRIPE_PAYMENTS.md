@@ -76,6 +76,13 @@ Settings come from environment variables (never the database):
 `local.yml` loads `../.env-stripe` and then `../.env-stripe-listen` from the
 directory above the repository, so neither file can be committed.
 
+Use a restricted key (`rk_`) as `STRIPE_SECRET_KEY` with Checkout Sessions:
+Write and Read on Balance, Balance transaction sources, Charges, Payouts,
+Disputes and Accounts. A missing permission makes Stripe name it in the error.
+`make stripe-listen` needs Debugging Tools: Write, which the app key should not
+have; put a separate key with only that permission in `../.env-stripe` as
+`STRIPE_CLI_KEY`.
+
 `STRIPE_ACCOUNT_ID` (`acct_...`) names the one Stripe account this ledger
 reconciles. Before its first Stripe call, each process checks that the key
 belongs to that account and refuses it otherwise (the API answers 503). After

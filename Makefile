@@ -54,8 +54,11 @@ check:
 
 STRIPE_EVENTS = checkout.session.completed,checkout.session.async_payment_succeeded,checkout.session.async_payment_failed,checkout.session.expired
 
-# Local Stripe webhooks (test mode). The key is read from ../.env-stripe, outside the repository.
-STRIPE_CLI = STRIPE_API_KEY="$$(sed -n 's/^STRIPE_SECRET_KEY=//p' ../.env-stripe)" stripe
+# Local Stripe webhooks (test mode). The key is read from ../.env-stripe, outside the repository:
+# STRIPE_CLI_KEY (a restricted key with only Debugging Tools: Write) if set, else STRIPE_SECRET_KEY.
+# The app's restricted key cannot start a stripe listen session.
+STRIPE_CLI_API_KEY = $$(k=$$(sed -n 's/^STRIPE_CLI_KEY=//p' ../.env-stripe); [ -n "$$k" ] || k=$$(sed -n 's/^STRIPE_SECRET_KEY=//p' ../.env-stripe); echo "$$k" | tr -d '"')
+STRIPE_CLI = STRIPE_API_KEY="$(STRIPE_CLI_API_KEY)" stripe
 
 stripe-webhook-secret:
 	@secret="$$($(STRIPE_CLI) listen --print-secret)" || exit 1; \
