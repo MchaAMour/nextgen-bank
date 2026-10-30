@@ -4,8 +4,6 @@ A Django REST banking backend (from the API-Imperfect course), extended with a
 double-entry **accounting platform**: a ledger, invoicing and payments, supplier
 bills, Stripe Checkout, bank reconciliation and financial reports.
 
-**Live demo:** https://next-gen-bank.srv1915831.hstgr.cloud (API docs; Stripe
-in sandbox mode)
 
 ## Documentation
 
